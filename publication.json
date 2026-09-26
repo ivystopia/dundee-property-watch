@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "files": {
+    ".nojekyll": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "assets/favicon.svg": "85e97bffaaa0cb5239ceb45bb84af1344355b2f92530346d8c441fa339c2d2d5",
+    "assets/pico-LICENSE.txt": "afaff063e044233f917b7807dccab022f09dca474f92b642846bee4850655bbf",
+    "assets/pico.jade.min.css": "dc3885c4785f04e3bd458469eec0d18bc071c2b1f1d2fd735e83d00dfe9571b3",
+    "assets/report.css": "ec84b2a9b90ca89f2ddfdfd802ff4960323bc5da58d63c84a60c2d3e4abd3a43",
+    "index.html": "3ab71b9cf25edca3f43192414cdede7a57ee75afec09808ce0fc886acbf65a64",
+    "page-2.html": "b96403a8ceceebdc239aa4a652bd2e46697011bd9664dda975ba471089e24079"
+  }
+}
