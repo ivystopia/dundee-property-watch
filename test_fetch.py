@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fetch import fetch
+from fetch import configured_proxy, fetch
 
 
 class ProxyConfigurationTests(unittest.TestCase):
@@ -22,7 +22,16 @@ class ProxyConfigurationTests(unittest.TestCase):
             self.assertNotIn('proxy.example', json.dumps(result))
 
     def test_missing_proxy_fails_optional_retry_without_a_network_request(self):
-        with tempfile.TemporaryDirectory() as temp, patch('fetch.public_url'), patch.dict('os.environ', {}, clear=True), patch('fetch.subprocess.run') as network:
+        with tempfile.TemporaryDirectory() as temp, patch('fetch.Path.home', return_value=Path(temp)), patch('fetch.public_url'), patch.dict('os.environ', {}, clear=True), patch('fetch.subprocess.run') as network:
             result = fetch('https://agent.example/', Path(temp) / 'snapshot.json', tor=True)
             network.assert_not_called()
             self.assertIn('DUNDEE_TOR_PROXY is not configured', result['error'])
+
+    def test_manual_calls_use_same_private_config_and_environment_can_override(self):
+        with tempfile.TemporaryDirectory() as temp, patch('fetch.Path.home', return_value=Path(temp)), patch.dict('os.environ', {}, clear=True):
+            config = Path(temp) / '.config/dundee-property-watch.env'
+            config.parent.mkdir()
+            config.write_text('# Local only\nDUNDEE_TOR_PROXY="socks5h://proxy.example:9050"\n')
+            self.assertEqual(configured_proxy(), 'socks5h://proxy.example:9050')
+            with patch.dict('os.environ', {'DUNDEE_TOR_PROXY': 'socks5h://other.example:9050'}):
+                self.assertEqual(configured_proxy(), 'socks5h://other.example:9050')

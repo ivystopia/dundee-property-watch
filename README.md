@@ -52,7 +52,7 @@ systemctl --user status dundee-property-watch.timer
 journalctl --user -u dundee-property-watch.service
 ```
 
-The service loads optional machine-specific values from `~/.config/dundee-property-watch.env`. The existing SOCKS retry endpoint is retained there, outside the public repository; set `DUNDEE_TOR_PROXY` in the shell for manual retries. No secret or private host configuration is embedded in the public code.
+The service loads optional machine-specific values from `~/.config/dundee-property-watch.env`. The existing SOCKS retry endpoint is retained there, outside the public repository. Manual research/helper calls read the same configuration automatically; an explicit `DUNDEE_TOR_PROXY` in the shell overrides it. No secret or private host configuration is embedded in the public code.
 
 The user timer runs at 08:00 Europe/London, automatically following BST/GMT. `Persistent=true` catches up when the user service manager starts after downtime; a sleeping machine checks after resume. It does not wake a powered-off machine or start before the user's service manager is available. The scheduled command skips a day already successfully published, including after a publication retry. A failed service retries once after 15 minutes within its start-limit window.
 

@@ -8,12 +8,30 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import shlex
 import socket
 import subprocess
 import tempfile
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
+
+
+def configured_proxy():
+    value = os.environ.get("DUNDEE_TOR_PROXY")
+    if value is not None:
+        return value
+    # Manual helper calls use the same private configuration as the user service.
+    path = Path.home() / ".config/dundee-property-watch.env"
+    if path.exists():
+        for line in path.read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() == "DUNDEE_TOR_PROXY":
+                values = shlex.split(value, comments=True)
+                if len(values) == 1:
+                    return values[0]
+                raise ValueError("Invalid DUNDEE_TOR_PROXY configuration")
+    return ""
 
 
 def public_url(url: str) -> str:
@@ -45,7 +63,7 @@ def fetch(url: str, output: Path, *, tor: bool = False) -> dict:
                            "--user-agent", "Mozilla/5.0 (compatible; DundeePropertyWatch/1.0)",
                            "--output", str(body_path), "--write-out", "%{json}", current]
                 if tor:
-                    proxy = os.environ.get("DUNDEE_TOR_PROXY")
+                    proxy = configured_proxy()
                     if not proxy:
                         raise ValueError("DUNDEE_TOR_PROXY is not configured for the optional SOCKS retry")
                     command[1:1] = ["--proxy", proxy]
