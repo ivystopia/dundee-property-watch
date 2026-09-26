@@ -19,7 +19,7 @@ The watch covers Dundee and Broughty Ferry, exactly 2–3 bedrooms, and advertis
 
 ## Site design and publication
 
-The light Pico Jade design was selected after screenshot comparisons with Just the Docs (the theme used by ivystopia.github.io) and Tabler; see [DESIGN.md](DESIGN.md). All 33 archive entries present during migration retained their exact visible card text, listing links and image URLs. The archive continues to grow without expiring older entries.
+The Pico Jade design was selected after screenshot comparisons with Just the Docs (the theme used by ivystopia.github.io) and Tabler; see [DESIGN.md](DESIGN.md). All 33 archive entries present during migration retained their exact visible card text, listing links and image URLs. The archive continues to grow without expiring older entries. The Dark mode toggle follows your device’s colour preference on the first visit and remembers an explicit choice across reloads and archive pages.
 
 GitHub Pages publishes the root of `gh-pages`, using `.nojekyll`. A checksum manifest, `publication.json`, describes the public files. The repository URL, source branch and public URL are explicit in `publication-settings.json`; the publisher verifies them against the current GitHub configuration before writing. Repository creation and Pages setup are one-time administrative steps, not actions performed by each daily run.
 

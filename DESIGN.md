@@ -25,3 +25,7 @@ Primary references:
 - https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site
 
 The local migration evidence includes all six comparison screenshots, the final desktop/mobile screenshots and an automated before/after comparison of every archived card's visible text, links and image URL. It is kept outside the public repository with the private migration snapshot.
+
+## Dark mode
+
+A keyboard-accessible Dark mode toggle switches between light and dark palettes. It uses the device preference until a visitor chooses a mode, then remembers that choice across archive pages and visits. The small local script applies the preference before styles load to avoid a bright flash. With JavaScript disabled, the report remains readable in its original light theme and the inactive toggle stays hidden.
