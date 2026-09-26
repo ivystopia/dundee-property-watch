@@ -17,7 +17,7 @@ ASSETS = {'assets/pico.jade.min.css', 'assets/report.css', 'assets/theme.js', 'a
 
 
 def public_path(name):
-    return name in ASSETS | {'index.html', '.nojekyll', 'publication.json'} or bool(re.fullmatch(r'page-[1-9][0-9]*\.html', name))
+    return name in ASSETS | {'index.html', '.nojekyll', 'publication.json'} or bool(re.fullmatch(r'page-[1-9][0-9]*\.html|images/[a-f0-9]{64}\.jpg', name))
 
 
 def snapshot(directory):
@@ -30,8 +30,11 @@ def snapshot(directory):
         name = path.relative_to(directory).as_posix()
         if not public_path(name):
             raise ValueError(f'Unexpected file in generated site: {name}')
+        data = path.read_bytes()
+        if name.startswith('images/') and (hashlib.sha256(data).hexdigest() != path.stem or not data.startswith(b'\xff\xd8\xff')):
+            raise ValueError('Invalid thumbnail content or checksum: ' + name)
         if name != 'publication.json':
-            files[name] = path.read_bytes()
+            files[name] = data
     if not {'index.html', '.nojekyll', *ASSETS} <= files.keys():
         raise ValueError('Generated report or required assets are missing')
     manifest = {'schema_version': 1, 'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}

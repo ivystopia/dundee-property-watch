@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 from html import escape
+import hashlib
 from itertools import groupby
 import json
 from pathlib import Path
@@ -38,7 +39,7 @@ def card(p, day):
     fallback = '<p class="agent">Original agent page unavailable; portal listing linked.</p>' if p["portal_fallback"] else ""
     photo = ""
     image_url = p.get("image_url")
-    if image_url and urlsplit(image_url).scheme in {"https", "http"}:
+    if image_url and re.fullmatch(r"images/[a-f0-9]{64}\.jpg", image_url):
         caption = "Developer’s house-type image; appearance may vary." if p["listing_kind"] == "new_build" else ""
         photo = f'''<figure class="photo"><a href="{e(p['url'], quote=True)}" aria-label="View listing for {e(p['address'], quote=True)}"><img src="{e(image_url, quote=True)}" alt="{e(p['address'], quote=True)}" loading="lazy" decoding="async" width="640" height="427" onerror="this.closest('article').classList.remove('has-photo');this.closest('figure').remove()"></a>{f'<figcaption>{caption}</figcaption>' if caption else ''}</figure>'''
     return f'''<article{' class="has-photo"' if photo else ''}>{photo}<div class="card-content"><div class="topline"><div class="price">£{p['price_gbp']:,}<span class="qualifier">{e(p['price_qualifier'])}</span></div><span class="facts">{p['bedrooms']} bedrooms · {e(p['property_type'])}{kind}</span></div>
@@ -58,10 +59,28 @@ def render(db, output):
     latest = db.execute("SELECT MAX(day) FROM runs WHERE status IN ('complete','partial')").fetchone()[0]
     if not latest:
         raise ValueError("No completed research run to publish")
-    rows = list(db.execute("SELECT r.day,r.data,p.first_seen,photo.image_url FROM reports r JOIN properties p ON p.id=r.property_id LEFT JOIN photos photo ON photo.property_id=p.id ORDER BY r.day DESC, json_extract(r.data,'$.listed_date') IS NULL, json_extract(r.data,'$.listed_date') DESC, json_extract(r.data,'$.price_gbp') DESC, r.property_id"))
+    rows = list(db.execute("SELECT r.day,r.data,p.first_seen,c.jpeg FROM reports r JOIN properties p ON p.id=r.property_id LEFT JOIN photos photo ON photo.property_id=p.id LEFT JOIN photo_cache c ON c.image_url=photo.image_url ORDER BY r.day DESC, json_extract(r.data,'$.listed_date') IS NULL, json_extract(r.data,'$.listed_date') DESC, json_extract(r.data,'$.price_gbp') DESC, r.property_id"))
     pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
     added = sum(row[0] == latest for row in rows)
     output.mkdir(parents=True, exist_ok=True)
+    images = output / "images"
+    images.mkdir(exist_ok=True)
+    image_names = set()
+    prepared = []
+    for day, data, first_seen, jpeg in rows:
+        image_url = None
+        if jpeg:
+            name = hashlib.sha256(jpeg).hexdigest() + ".jpg"
+            if name not in image_names:
+                target = images / name
+                if not target.exists() or target.read_bytes() != jpeg:
+                    temporary = images / ("." + name + ".tmp")
+                    temporary.write_bytes(jpeg)
+                    temporary.replace(target)
+                image_names.add(name)
+            image_url = "images/" + name
+        prepared.append((day, data, first_seen, image_url))
+    rows = prepared
     assets = output / "assets"
     assets.mkdir(exist_ok=True)
     for source in (Path(__file__).resolve().parent / "assets").iterdir():
@@ -92,5 +111,8 @@ def render(db, output):
     for stale in output.glob("page-*.html"):
         match = re.fullmatch(r"page-(\d+)\.html", stale.name)
         if match and int(match[1]) > pages:
+            stale.unlink()
+    for stale in images.glob("*.jpg"):
+        if re.fullmatch(r"[a-f0-9]{64}\.jpg", stale.name) and stale.name not in image_names:
             stale.unlink()
     return output / "index.html"

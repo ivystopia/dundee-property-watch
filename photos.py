@@ -1,8 +1,8 @@
-"""Best-effort property thumbnail discovery; only verified hotlinks are stored."""
+"""Bounded property-photo discovery and cached thumbnails for local publication."""
 from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import json
 from pathlib import Path
@@ -13,7 +13,7 @@ import time
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
-from PIL import Image
+from PIL import Image, ImageOps
 
 from fetch import public_url
 
@@ -41,7 +41,7 @@ def _request(url, deadline, max_bytes=3_000_000):
             response = subprocess.run([
                 "curl", "--silent", "--show-error", "--compressed", "--max-time", str(timeout),
                 "--connect-timeout", str(min(3, timeout)), "--max-filesize", str(max_bytes),
-                "--proto", "=http,https", "--referer", "https://ivyf.net/",
+                "--proto", "=http,https",
                 "--user-agent", "Mozilla/5.0 (compatible; DundeePropertyWatch/1.0)",
                 "--output", str(path), "--write-out", "%{json}", current,
             ], capture_output=True, text=True, timeout=timeout + 0.5)
@@ -140,6 +140,64 @@ def probe_image(url, deadline):
     except (OSError, ValueError, Image.DecompressionBombError):
         return None
     return actual_url
+
+
+def download_thumbnail(url, deadline):
+    """Decode a public photo and produce a small JPEG without source metadata."""
+    actual_url, content_type, data = _request(url, deadline, max_bytes=5_000_000)
+    if not content_type.startswith("image/") or UNSUITABLE.search(actual_url):
+        raise ValueError("Not a property image")
+    with Image.open(BytesIO(data)) as original:
+        width, height = original.size
+        if (original.format not in {"JPEG", "PNG", "WEBP", "AVIF"}
+                or width < 320 or height < 180 or width * height > 20_000_000
+                or not 0.5 <= width / height <= 3):
+            raise ValueError("Unsuitable thumbnail dimensions or format")
+        picture = ImageOps.exif_transpose(original)
+        picture.thumbnail((960, 720), Image.Resampling.LANCZOS)
+        rgba = picture.convert("RGBA")
+        clean = Image.new("RGB", rgba.size, "white")
+        clean.paste(rgba, mask=rgba.getchannel("A"))
+        output = BytesIO()
+        clean.save(output, format="JPEG", quality=82, optimize=True)
+    return output.getvalue()
+
+
+def cache_photos(db):
+    """Fetch each archived photo once; retry failed downloads after one day."""
+    with db:
+        db.execute("""CREATE TABLE IF NOT EXISTS photo_cache (
+            image_url TEXT PRIMARY KEY, jpeg BLOB, checked_at TEXT NOT NULL)""")
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    urls = [row[0] for row in db.execute("""
+        SELECT DISTINCT p.image_url FROM photos p
+        LEFT JOIN photo_cache c ON c.image_url=p.image_url
+        WHERE p.image_url IS NOT NULL
+          AND EXISTS (SELECT 1 FROM reports r WHERE r.property_id=p.property_id)
+          AND (c.image_url IS NULL OR (c.jpeg IS NULL AND c.checked_at < ?))
+        ORDER BY p.image_url""", (cutoff,))]
+    deadline = time.monotonic() + BUDGET_SECONDS
+
+    def download(url):
+        if time.monotonic() >= deadline:
+            return url, None, False
+        try:
+            return url, download_thumbnail(url, deadline), True
+        except Exception:
+            return url, None, True
+
+    attempted = cached = 0
+    # Network/image work is parallel; all SQLite access remains on this thread.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        for url, jpeg, tried in pool.map(download, urls):
+            if not tried:
+                continue
+            with db:
+                db.execute("INSERT OR REPLACE INTO photo_cache VALUES (?,?,?)",
+                           (url, jpeg, datetime.now(timezone.utc).isoformat()))
+            attempted += 1
+            cached += jpeg is not None
+    return {"attempted": attempted, "cached": cached}
 
 
 def discover_photo(property_data, deadline):

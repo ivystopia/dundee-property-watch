@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 from fetch import fetch
 from model import SCHEMA
 from pages import publish_site
-from photos import enrich_photos
+from photos import cache_photos, enrich_photos
 from render import render
 from store import connect, context, import_export, ingest, inventory_urls, now
 
@@ -197,6 +197,7 @@ def research(job):
 
 def publish(db):
     enrich_photos(db)
+    log("Thumbnail cache: " + json.dumps(cache_photos(db)))
     render(db, SITE)
     publication = publish_site(ROOT, SITE, log=log)
     with db:
@@ -243,6 +244,7 @@ def run(db, state, should_publish, scheduled=False):
             db.execute("UPDATE runs SET status='failed',finished=?,error=? WHERE id=?", (now(), str(exc), run_id))
         raise
     enrich_photos(db, day=day)
+    cache_photos(db)
     render(db, SITE)
     if should_publish:
         publish(db)

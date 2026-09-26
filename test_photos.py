@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from photos import discover_photo, enrich_photos, image_candidates, probe_image
+from photos import cache_photos, discover_photo, download_thumbnail, enrich_photos, image_candidates, probe_image
 from store import connect
 
 
@@ -46,6 +46,52 @@ class PhotoTests(unittest.TestCase):
         with patch("photos._request", side_effect=request) as requests, patch("photos.probe_image", return_value=photo):
             self.assertEqual(discover_photo({"url": original, "additional_urls": [{"url": portal}]}, float("inf")), (photo, portal))
         self.assertEqual([call.args[0] for call in requests.call_args_list], [original, portal])
+
+    def test_download_produces_small_metadata_free_jpeg_and_rejects_bad_content(self):
+        original = BytesIO()
+        metadata = Image.Exif()
+        metadata[270] = 'Private camera description'
+        Image.new('RGB', (1600, 1000), 'green').save(original, format='JPEG', exif=metadata)
+        url = 'https://images.example/house.jpg'
+        with patch('photos._request', return_value=(url, 'image/jpeg', original.getvalue())):
+            jpeg = download_thumbnail(url, float('inf'))
+        with Image.open(BytesIO(jpeg)) as image:
+            self.assertEqual(image.format, 'JPEG')
+            self.assertEqual(image.size, (960, 600))
+            self.assertFalse(image.getexif())
+            image.verify()
+        self.assertLess(len(jpeg), len(original.getvalue()))
+        for content_type, body in [('text/html', original.getvalue()), ('image/jpeg', b'not a photo')]:
+            with self.subTest(content_type=content_type), patch('photos._request', return_value=(url, content_type, body)):
+                with self.assertRaises((OSError, ValueError)):
+                    download_thumbnail(url, float('inf'))
+
+    def test_cached_photos_survive_source_failure_and_failed_downloads_retry_later(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = connect(Path(directory))
+            with db:
+                for index in range(3):
+                    property_id = str(index)
+                    db.execute('INSERT INTO properties VALUES (?,?,?,?)', (property_id, '{}', '2026-01-01', '2026-01-01'))
+                    db.execute('INSERT INTO reports VALUES (?,?,?)', ('2026-01-01', property_id, '{}'))
+                    # Two homes sharing one image should cause only one download.
+                    url = 'https://images.example/' + ('good.jpg' if index < 2 else 'failed.jpg')
+                    db.execute('INSERT INTO photos VALUES (?,?,?,?)', (property_id, url, 'https://agent.example/', '2026-01-01'))
+            def download(url, deadline):
+                if url.endswith('failed.jpg'):
+                    raise OSError('Source temporarily unavailable')
+                return b'cached JPEG bytes'
+            with patch('photos.download_thumbnail', side_effect=download) as downloads:
+                self.assertEqual(cache_photos(db), {'attempted': 2, 'cached': 1})
+                self.assertEqual(cache_photos(db), {'attempted': 0, 'cached': 0})
+                self.assertEqual(downloads.call_count, 2)
+            with db:
+                db.execute("UPDATE photo_cache SET checked_at='2020-01-01'")
+            with patch('photos.download_thumbnail', return_value=b'recovered image') as downloads:
+                self.assertEqual(cache_photos(db), {'attempted': 1, 'cached': 1})
+                self.assertEqual(downloads.call_args.args[0], 'https://images.example/failed.jpg')
+            self.assertEqual(db.execute("SELECT jpeg FROM photo_cache WHERE image_url LIKE '%good.jpg'").fetchone()[0], b'cached JPEG bytes')
+            db.close()
 
     def test_success_and_failure_are_cached_without_cross_thread_sqlite_access(self):
         with tempfile.TemporaryDirectory() as directory:

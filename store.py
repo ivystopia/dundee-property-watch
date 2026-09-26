@@ -38,6 +38,8 @@ def connect(state):
         CREATE TABLE IF NOT EXISTS photos (
             property_id TEXT PRIMARY KEY REFERENCES properties(id), image_url TEXT,
             page_url TEXT, checked_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS photo_cache (
+            image_url TEXT PRIMARY KEY, jpeg BLOB, checked_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS legacy (
             id TEXT PRIMARY KEY, data TEXT NOT NULL, matched_property_id TEXT REFERENCES properties(id));
         CREATE TABLE IF NOT EXISTS imports (sha256 TEXT PRIMARY KEY, imported TEXT NOT NULL);

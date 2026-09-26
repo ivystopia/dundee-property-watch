@@ -1,5 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
@@ -7,6 +9,7 @@ import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from PIL import Image
 from model import validate_candidate
 from render import render
 from store import connect, context, ingest
@@ -134,6 +137,10 @@ class WatchTests(unittest.TestCase):
             self.db.execute("INSERT INTO properties VALUES (?,?,?,?)", (str(index), json.dumps(p), self.started, self.started))
             self.db.execute("INSERT INTO reports VALUES ('2020-01-02',?,?)", (str(index), json.dumps(p)))
         self.db.execute("INSERT INTO photos VALUES (?,?,?,?)", ('1', 'https://images.example/home.jpg', self.p['url'], self.started))
+        image = BytesIO()
+        Image.new('RGB', (640, 427), 'green').save(image, format='JPEG')
+        jpeg = image.getvalue()
+        self.db.execute("INSERT INTO photo_cache VALUES (?,?,?)", ('https://images.example/home.jpg', jpeg, self.started))
         self.db.commit()
         html = render(self.db, self.root / "site").read_text()
         older = (self.root / "site/page-2.html").read_text()
@@ -144,13 +151,17 @@ class WatchTests(unittest.TestCase):
         self.assertIn('href="page-2.html"', html)
         self.assertIn('href="index.html"', older)
         self.assertIn('2 Example Road', older)
-        self.assertIn('src="https://images.example/home.jpg"', html)
+        image_path = 'images/' + hashlib.sha256(jpeg).hexdigest() + '.jpg'
+        self.assertIn(f'src="{image_path}"', html)
+        self.assertNotIn('src="https://', html)
+        self.assertEqual((self.root / 'site' / image_path).read_bytes(), jpeg)
         self.assertIn('loading="lazy"', html)
         (self.root / "site/page-notes.html").write_text("Unrelated content")
         self.db.execute("DELETE FROM reports WHERE property_id IN ('1','2')")
         self.db.commit()
         render(self.db, self.root / "site")
         self.assertFalse((self.root / "site/page-2.html").exists())
+        self.assertFalse((self.root / 'site' / image_path).exists())
         self.assertTrue((self.root / "site/page-notes.html").exists())
 
     def test_failed_pages_publication_remains_pending_for_retry(self):

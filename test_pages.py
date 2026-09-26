@@ -1,4 +1,5 @@
 import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 import subprocess
@@ -6,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from PIL import Image
 import pages
 
 
@@ -98,6 +100,24 @@ class PublicationTests(unittest.TestCase):
             pages.wait_for_publication('owner/repo', 'target', files, 'https://example.test/report/', interval=0, log=lambda _: None)
         self.assertEqual(read.call_count, 2)
         self.assertTrue(all('deployment=target' in call.args[0] for call in read.call_args_list))
+
+    def test_snapshot_publishes_only_named_checksummed_thumbnail_files(self):
+        site = self.root / 'site';site.mkdir()
+        for name in pages.ASSETS | {'index.html', '.nojekyll'}:
+            path = site / name;path.parent.mkdir(exist_ok=True);path.write_bytes(b'Public')
+        image = BytesIO()
+        Image.new('RGB', (640, 427), 'green').save(image, format='JPEG')
+        jpeg = image.getvalue()
+        name = 'images/' + hashlib.sha256(jpeg).hexdigest() + '.jpg'
+        photo = site / name;photo.parent.mkdir();photo.write_bytes(jpeg)
+        files = pages.snapshot(site)
+        self.assertEqual(files[name], jpeg)
+        self.assertIn(name, json.loads(files['publication.json'])['files'])
+        photo.write_bytes(b'Corrupt or private contents')
+        with self.assertRaisesRegex(ValueError, 'thumbnail content or checksum'):
+            pages.snapshot(site)
+        for invalid in ['images/history.sqlite3', 'images/photo.jpg', 'images/../history.sqlite3', 'images/' + 'a'*64 + '.svg']:
+            self.assertFalse(pages.public_path(invalid), invalid)
 
     def test_failed_build_does_not_pass_verification(self):
         with patch('pages.github', return_value=[{'commit': 'target', 'status': 'errored', 'error': {'message': 'Build error'}}]), self.assertRaisesRegex(ValueError, 'build failed'):
