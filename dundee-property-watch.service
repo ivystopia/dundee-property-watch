@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily Dundee property research and report
+StartLimitIntervalSec=3h
+StartLimitBurst=2
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/repos/personal/dundee-property-watch
+ExecStart=/usr/bin/python3 %h/repos/personal/dundee-property-watch/watch.py run --publish --scheduled
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-%h/.config/dundee-property-watch.env
+UMask=0077
+TimeoutStartSec=50min
+KillMode=control-group
+Restart=on-failure
+RestartSec=15min

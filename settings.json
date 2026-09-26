@@ -1,0 +1,7 @@
+{
+  "model": "gpt-6-astra",
+  "reasoning_effort": "high",
+  "max_concurrent_research": 3,
+  "research_budget_minutes": 5,
+  "research_timeout_seconds": 600
+}

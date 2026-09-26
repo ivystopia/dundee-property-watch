@@ -1,0 +1,205 @@
+[
+  {
+    "id": "rightmove",
+    "name": "Rightmove",
+    "urls": [
+      "https://www.rightmove.co.uk/property-for-sale/Dundee.html",
+      "https://www.rightmove.co.uk/property-for-sale/Broughty-Ferry.html"
+    ],
+    "instructions": "Rightmove. Discovery only via public web search/pages, NOT the Rightmove app/widget. Search Dundee and Broughty Ferry sales with 2-3 bedrooms, maximum GBP 260,000 and Newest Listed/newest-added first where the public site exposes that control. Verify matches and then find the selling agent's original listing before reporting.\n\n"
+  },
+  {
+    "id": "zoopla",
+    "name": "Zoopla",
+    "urls": [
+      "https://www.zoopla.co.uk/for-sale/property/dundee/"
+    ],
+    "instructions": "Zoopla. Start at https://www.zoopla.co.uk/for-sale/property/dundee/ and use its location search for Broughty Ferry as well. Select Most recent/Newest listed if exposed, with 2-3 bedrooms and the price cap. No working chronological query-string mapping was verified during setup: do not assume a guessed parameter works. If selection is unavailable, compare accessible qualifying inventory and individual listing dates. Use Zoopla for discovery only and replace its link with the original agent listing where possible.\n\n"
+  },
+  {
+    "id": "tspc",
+    "name": "TSPC",
+    "urls": [
+      "https://tspc.co.uk/properties/?search=dundee&area=&bedrooms=2&min-price=&max-price=260000&property-type=&sort=latest-first",
+      "https://tspc.co.uk/properties/?search=Broughty%20Ferry&area=&bedrooms=2&min-price=&max-price=260000&property-type=&sort=latest-first"
+    ],
+    "instructions": "TSPC. Preserve BOTH user-supplied latest-first searches:\nhttps://tspc.co.uk/properties/?search=dundee&area=&bedrooms=2&min-price=&max-price=260000&property-type=&sort=latest-first\nhttps://tspc.co.uk/properties/?search=Broughty%20Ferry&area=&bedrooms=2&min-price=&max-price=260000&property-type=&sort=latest-first\nThe bedroom parameter is not permission to include 4+ bedrooms. These URLs could not be fully revalidated by the web reader during setup; attempt them, then accessible TSPC listing pages/site-restricted search if needed. Do not claim a blocked filtered search succeeded. Use TSPC for discovery; prefer the original selling-agent listing in output.\n\n"
+  },
+  {
+    "id": "onthemarket",
+    "name": "OnTheMarket",
+    "urls": [
+      "https://www.onthemarket.com/for-sale/property/dundee/?min-bedrooms=2&max-price=260000&sort-field=update_date&view=map-list",
+      "https://www.onthemarket.com/for-sale/property/dundee/"
+    ],
+    "instructions": "OnTheMarket. Use the user's Dundee search, which is intended to cover Broughty Ferry too:\nhttps://www.onthemarket.com/for-sale/property/dundee/?min-bedrooms=2&max-price=260000&sort-field=update_date&view=map-list\nBase fallback: https://www.onthemarket.com/for-sale/property/dundee/\nThe supplied sort is update_date, NOT proof of original listing date. Distinguish Added from Reduced/Updated. Enforce a maximum of 3 bedrooms manually. The base page was accessible during setup, but the filtered URL was not fully revalidated. Check individual addresses and dates. Use OnTheMarket for discovery; prefer the original selling-agent listing in output.\n\n"
+  },
+  {
+    "id": "s1homes",
+    "name": "s1homes",
+    "urls": [
+      "https://www.s1homes.com/property-for-sale/dundee"
+    ],
+    "instructions": "s1homes. https://www.s1homes.com/property-for-sale/dundee\nUse the location selector for Broughty Ferry too. The Newest Listed control and Added to site filters were verified in the page. Select Newest Listed, min 2/max 3 beds and max GBP 260,000. Prefer Last 3 days for overlap, widening for missed runs; Last 24 hours alone can miss delayed indexing. Do not select new-homes-only. The web reader exposed controls but not the dynamic results, so use indexed listing pages and original-agent verification if necessary. Use s1homes for discovery; prefer the original agent listing in output.\n\n"
+  },
+  {
+    "id": "primelocation",
+    "name": "PrimeLocation",
+    "urls": [
+      "https://www.primelocation.com/for-sale/property/dundee/"
+    ],
+    "instructions": "PrimeLocation. https://www.primelocation.com/for-sale/property/dundee/\nAlso search Broughty Ferry. Newest was surfaced in indexed search controls; select it if available with the cap and 2-3 beds. The directly read page defaulted to price-descending. A working newest-sorted URL was not verified. Compare dates/identities if the control is inaccessible, deduplicate against all other portals, and replace portal links with original agent links where possible."
+  },
+  {
+    "id": "thorntons",
+    "name": "Thorntons Property",
+    "urls": [
+      "https://thorntons-property.co.uk/Dundee"
+    ],
+    "instructions": "Thorntons Property. https://thorntons-property.co.uk/Dundee\nUse its location, price and bedroom controls for Dundee and Broughty Ferry. A functioning newest-first control was not verified; the accessible list appeared price-descending. Use newest/date sorting only if subsequently verified, otherwise inspect all qualifying sale inventory across pages. The wider area can include other towns.\n\n"
+  },
+  {
+    "id": "gilson-gray",
+    "name": "Gilson Gray",
+    "urls": [
+      "https://gilsongray.co.uk/property/buying-selling/property-for-sale/dundee/"
+    ],
+    "instructions": "Gilson Gray. https://gilsongray.co.uk/property/buying-selling/property-for-sale/dundee/\nAlso select Broughty Ferry in its location search. Newest Listed appeared in indexed site controls; select it with the cap and 2-3 bedrooms. The live parser did not expose the dropdown values or a verified sort URL. If unavailable, compare filtered sale inventory. Reject out-of-area matches caused by streets named Dundee.\n\n"
+  },
+  {
+    "id": "verdala",
+    "name": "Verdala",
+    "urls": [
+      "https://verdala.co.uk/properties/",
+      "https://verdala.co.uk/properties/?availability=2&department=residential-sales&keyword=&maximum_price=&minimum_bedrooms=&property_type="
+    ],
+    "instructions": "Verdala. https://verdala.co.uk/properties/\nVerified For Sale route:\nhttps://verdala.co.uk/properties/?availability=2&department=residential-sales&keyword=&maximum_price=&minimum_bedrooms=&property_type=\nSelect For Sale, the price cap and at least 2 beds, then independently require 2 or 3. Sort by date added appeared in indexed site controls; select it and confirm newest-first direction where possible. Do not invent an orderby value or mistake the default price order for recency. Exclude sold/under-offer stock.\n\n"
+  },
+  {
+    "id": "rosie-fraser",
+    "name": "Rosie Fraser Real Estate",
+    "urls": [
+      "https://www.rosiefraserrealestate.com/search/"
+    ],
+    "instructions": "Rosie Fraser Real Estate. https://www.rosiefraserrealestate.com/search/\nUse Sales only, cap GBP 260,000, 2-3 bedrooms, exclude sold/STC. Indexed sort controls exposed Price: High to Low and Price: Low to High, not a verified chronological option. Compare qualifying addresses/property IDs across ALL relevant pages; never assume page 1 is newest. Direct reads can fail, so use indexed own-site pages/agent stock as a fallback.\n\n"
+  },
+  {
+    "id": "axis",
+    "name": "Axis Property",
+    "urls": [
+      "https://www.axispropertygroup.co.uk/",
+      "https://www.axispropertygroup.co.uk/properties/sales"
+    ],
+    "instructions": "Axis Property. https://www.axispropertygroup.co.uk/\nFull sale inventory: https://www.axispropertygroup.co.uk/properties/sales\nThe homepage has Most Recent Properties, but full inventory newest sorting was not verified and some results were dynamic. Check the latest section AND qualifying sale inventory; compare identities and use site-restricted search if necessary.\n\n"
+  },
+  {
+    "id": "harmony",
+    "name": "Harmony Homes",
+    "urls": [
+      "https://www.harmonyhomesestateagency.com/properties-for-sale",
+      "https://www.harmonyhomesestateagency.com/"
+    ],
+    "instructions": "Harmony Homes. https://www.harmonyhomesestateagency.com/properties-for-sale\nAlso inspect Latest Properties on https://www.harmonyhomesestateagency.com/\nThe homepage latest section and New labels were visible, but full inventory newest sorting was not verified. Check all relevant sale pages under the cap and compare identities; a New badge alone is not an exact added date.\n\n"
+  },
+  {
+    "id": "your-move",
+    "name": "Your Move",
+    "urls": [
+      "https://www.your-move.co.uk/properties-for-sale/dundee",
+      "https://www.your-move.co.uk/estate-agent/dundee/find-property-for-sale"
+    ],
+    "instructions": "Your Move. Geographical search: https://www.your-move.co.uk/properties-for-sale/dundee\nBranch search: https://www.your-move.co.uk/estate-agent/dundee/find-property-for-sale\nNewest listed was verified in the branch menu. Select it, cap GBP 260,000, min 2/max 3 beds. Use the geographical search for Dundee and Broughty Ferry too: the site says nearby branches can hold additional local stock. Do not restrict discovery to the Dundee branch or treat its out-of-town stock as Dundee.\n\n"
+  },
+  {
+    "id": "tula",
+    "name": "Tula Property",
+    "urls": [
+      "https://tulaproperty.co.uk/sales/",
+      "https://tulaproperty.co.uk/properties/"
+    ],
+    "instructions": "Tula Property. Sales entry: https://tulaproperty.co.uk/sales/\nInventory: https://tulaproperty.co.uk/properties/\nIMPORTANT: the homepage Properties link and the unfiltered inventory opened rentals during setup. Explicitly select For Sale; verify sale prices, not monthly rent. The sales service page includes an Our Properties section. No newest-first sort was verified. Compare qualifying sales inventory and use named-agent portal stock/site-restricted search if direct sale filtering is inaccessible.\n\n"
+  },
+  {
+    "id": "keystone",
+    "name": "Keystone Property",
+    "urls": [
+      "https://www.thekeystoneproperty.com/properties/?businessCategoryId=1&orderBy=LastPutOnMarket&orderDirection=DESC&page=1&pageSize=50&propInd=S&searchType=grid"
+    ],
+    "instructions": "Keystone Property. Retain the located last-put-on-market URL:\nhttps://www.thekeystoneproperty.com/properties/?businessCategoryId=1&orderBy=LastPutOnMarket&orderDirection=DESC&page=1&pageSize=50&propInd=S&searchType=grid\nIt loads, but actual chronological ordering was NOT confirmed: the accessible inventory appeared address-ordered and dropdown values were hidden. Verify the selected order before relying on it; otherwise compare qualifying property IDs across pages. Apply locality, 2-3 beds and cap independently.\n\n"
+  },
+  {
+    "id": "mcintyre",
+    "name": "McIntyre Properties",
+    "urls": [
+      "https://www.mcintyre-properties.com/properties-for-sale"
+    ],
+    "instructions": "McIntyre Properties. https://www.mcintyre-properties.com/properties-for-sale\nNew labels were visible, but a newest-first sort was not verified and the readable results appeared price-descending. Use a date sort only if subsequently verified; otherwise inspect all qualifying sale pages and compare identities. A badge is not an exact listing date.\n\n"
+  },
+  {
+    "id": "mcewan-fraser",
+    "name": "McEwan Fraser Legal",
+    "urls": [
+      "https://www.mcewanfraserlegal.co.uk/properties?location=dundee"
+    ],
+    "instructions": "McEwan Fraser Legal. https://www.mcewanfraserlegal.co.uk/properties?location=dundee\nAlso use its location selector for Broughty Ferry. No newest-first control was verified; readable results appeared price-descending. Compare qualifying active inventory across pages, using individual dates when available.\n\n"
+  },
+  {
+    "id": "yopa",
+    "name": "Yopa",
+    "urls": [
+      "https://www.yopa.co.uk/houses-for-sale/DD5"
+    ],
+    "instructions": "Yopa. Verified area entry: https://www.yopa.co.uk/houses-for-sale/DD5\nUse its own search/navigation to cover Dundee as well as Broughty Ferry; DD5 alone misses much of Dundee. Do not include other DD5 towns automatically. No newest-first control or reliable sort mapping was verified. Compare matching active inventory across relevant areas/pages, cap and bedrooms independently.\n\n"
+  },
+  {
+    "id": "purplebricks",
+    "name": "Purplebricks",
+    "urls": [
+      "https://www.purplebricks.co.uk/search/property-for-sale/dundee-city-council/dundee"
+    ],
+    "instructions": "Purplebricks. https://www.purplebricks.co.uk/search/property-for-sale/dundee-city-council/dundee\nAlso cover Broughty Ferry through the location search. The Sort properties dropdown was visible, but its option values/newest mapping were not verified. Do NOT assume sortBy=2 means newest. Select Most recent only if actually exposed; otherwise compare matching inventory. The default search radius was broad, so exclude other towns by actual address and enforce cap/bedrooms."
+  },
+  {
+    "id": "future-auctions",
+    "name": "Future Property Auctions",
+    "urls": [
+      "https://www.futurepropertyauctions.co.uk/catalogue_sortdatelisted.asp",
+      "https://www.futurepropertyauctions.co.uk/"
+    ],
+    "instructions": "Future Property Auctions. Use the verified Latest Listings page:\nhttps://www.futurepropertyauctions.co.uk/catalogue_sortdatelisted.asp\nIt is labelled LATEST 300 ENTRIES. Fallback: https://www.futurepropertyauctions.co.uk/\nSearch current Dundee/Broughty Ferry lots; compare lot identities and individual listing dates. New Entries and Price Drops are different signals. Auction date is not listing date.\n\n"
+  },
+  {
+    "id": "first-choice-auctions",
+    "name": "First Choice Property Auctions",
+    "urls": [
+      "https://firstchoicepropertyauctions.co.uk/",
+      "https://firstchoicepropertyauctions.co.uk/city/dundee/"
+    ],
+    "instructions": "First Choice Property Auctions. https://firstchoicepropertyauctions.co.uk/\nDundee category: https://firstchoicepropertyauctions.co.uk/city/dundee/\nA sort dropdown was visible but newest-first mapping was not verified. Compare active lot identities. The Dundee category exposed sold and out-of-area stock, so verify actual town and active status for every candidate.\nFor both auctioneers, require an actual residential 2-3 bedroom property with an advertised guide/asking price no higher than GBP 260,000. Clearly label AUCTION and GUIDE PRICE where applicable, and note disclosed mandatory buyer fees. A low opening bid alone is not evidence of a qualifying asking/guide price; skip unpriced/POA-only lots. Never present a guide as a guaranteed purchase price or guarantee the total acquisition cost is within the cap. Do not register, bid or contact anyone."
+  },
+  {
+    "id": "persimmon",
+    "name": "Persimmon Homes",
+    "urls": [
+      "https://www.persimmonhomes.com/new-homes/north-scotland/ballumbie-heights"
+    ],
+    "instructions": "Persimmon Homes. https://www.persimmonhomes.com/new-homes/north-scotland/ballumbie-heights\nAlso inspect other Dundee developments found through its own site. Compare available/newly released plot identities; no newest-first plot sort was verified.\n\n"
+  },
+  {
+    "id": "barratt",
+    "name": "Barratt Homes",
+    "urls": [
+      "https://www.barratthomes.co.uk/new-homes/dev-002586-keiller%27s-rise/"
+    ],
+    "instructions": "Barratt Homes. https://www.barratthomes.co.uk/new-homes/dev-002586-keiller%27s-rise/\nAlso inspect other Dundee developments found through its own site. Compare available/newly released plot identities; no newest-first plot sort was verified.\n\n"
+  },
+  {
+    "id": "springfield",
+    "name": "Springfield",
+    "urls": [
+      "https://www.springfield.co.uk/",
+      "https://www.springfield.co.uk/homes-for-sale/7-dundee"
+    ],
+    "instructions": "Springfield. https://www.springfield.co.uk/\nDykes of Gray, Dundee route found in the site's index: https://www.springfield.co.uk/homes-for-sale/7-dundee\nThe homepage identified the development, but the deep development page was not accessible during setup. Follow current site navigation/indexed plot pages if needed. Compare available plot identities; no newest-first plot sort was verified.\nFor all builders, require an actually available individual 2-3 bedroom plot priced at or below GBP 260,000. Do not qualify an entire development from a general from-price, incentive, completion date, or unpriced future release. Use development plus plot number as the identity. Preserve the cap even when no current plots qualify."
+  }
+]
