@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 
-ASSETS = {'assets/pico.jade.min.css', 'assets/report.css', 'assets/theme.js', 'assets/pico-LICENSE.txt', 'assets/favicon.svg'}
+ASSETS = {'assets/pico.jade.min.css', 'assets/report.css', 'assets/theme.js', 'assets/pico-LICENSE.txt', 'assets/tabler-LICENSE.txt', 'assets/favicon.svg'}
 
 
 def public_path(name):

@@ -29,3 +29,9 @@ The local migration evidence includes all six comparison screenshots, the final 
 ## Dark mode
 
 A keyboard-accessible Dark mode toggle switches between light and dark palettes. It uses the device preference until a visitor chooses a mode, then remembers that choice across archive pages and visits. The small local script applies the preference before styles load to avoid a bright flash. With JavaScript disabled, the report remains readable in its original light theme and the inactive toggle stays hidden.
+
+## Property type indicators
+
+The property archive uses a restrained preservation approach: DESIGN_VARIANCE 3, MOTION_INTENSITY 1, VISUAL_DENSITY 5. Each listing starts with an icon and plain type label beside the bedroom count, in a consistent position above its photograph and details. Full source labels distinguish detached bungalows, end-terrace houses and floor levels; the icon is a scanning aid, never an inference about a photograph. The indicators share the existing light/dark colour tokens, without a border, background or button shape. They remain readable without JavaScript, colour differentiation or motion.
+
+Icons use locally embedded outline paths from Tabler Icons v3.48.0, with paired/row compositions of its home glyph for semi-detached and terraced houses. The MIT licence is distributed at assets/tabler-LICENSE.txt. This adds no browser dependency, external request or scheduled research work. Source: https://github.com/tabler/tabler-icons/tree/v3.48.0/icons/outline

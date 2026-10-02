@@ -17,6 +17,46 @@ from model import MAX_PRICE_GBP
 PAGE_SIZE = 20
 
 
+# Tabler Icons v3.48.0 (MIT), outline paths copied from the pinned release.
+# Semi/terrace compose the official home glyph. See assets/tabler-LICENSE.txt.
+# https://github.com/tabler/tabler-icons/tree/v3.48.0/icons/outline
+TYPE_ICONS = {
+    'bungalow': '<path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" />',
+    'flat': '<path d="M3 21l18 0" /><path d="M9 8l1 0" /><path d="M9 12l1 0" /><path d="M9 16l1 0" /><path d="M14 8l1 0" /><path d="M14 12l1 0" /><path d="M14 16l1 0" /><path d="M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16" />',
+    'maisonette': '<path d="M8 9l5 5v7h-5v-4m0 4h-5v-7l5 -5m1 1v-6a1 1 0 0 1 1 -1h10a1 1 0 0 1 1 1v17h-8" /><path d="M13 7l0 .01" /><path d="M17 7l0 .01" /><path d="M17 11l0 .01" /><path d="M17 15l0 .01" />',
+    'detached': '<path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M10 12h4v4h-4l0 -4" />',
+    'semi': '<g transform="translate(0 4) scale(.67)"><path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></g><g transform="translate(12 4) scale(.67)"><path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></g>',
+    'terrace': '<g transform="translate(0 6) scale(.5)"><path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></g><g transform="translate(9 6) scale(.5)"><path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></g><g transform="translate(18 6) scale(.5)"><path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" /></g>',
+    'house': '<path d="M5 12l-2 0l9 -9l9 9l-2 0" /><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" /><path d="M10 12h4v4h-4l0 -4" />',
+    'other': '<path d="M20.136 11.136l-8.136 -8.136l-9 9h2v7a2 2 0 0 0 2 2h7" /><path d="M9 21v-6a2 2 0 0 1 2 -2h2c.467 0 .896 .16 1.236 .428" /><path d="M19 22v.01" /><path d="M19 19a2 2 0 0 0 .914 -3.782a1.98 1.98 0 0 0 -2.414 .483" />',
+}
+
+
+def property_type_badge(property_type):
+    """Use the stated type; icons never infer a subtype from photos or address."""
+    text = property_type.strip() or "Type not stated"
+    normalized = re.sub(r"[\s\u2010-\u2015-]+", " ", text.casefold())
+    if "bungalow" in normalized:
+        category = "bungalow"
+    elif "maisonette" in normalized:
+        category = "maisonette"
+    elif re.search(r"\b(flat|apartment)\b", normalized):
+        category = "flat"
+    elif "semi detached" in normalized:
+        category = "semi"
+    elif "terrace" in normalized:
+        category = "terrace"
+    elif "detached" in normalized:
+        category = "detached"
+    elif re.search(r"\b(house|cottage|villa|townhouse)\b", normalized):
+        category = "house"
+    else:
+        category = "other"
+    view_box = "0 0 28 24" if category == "semi" else "0 0 30 24" if category == "terrace" else "0 0 24 24"
+    icon = f'<svg viewBox="{view_box}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">{TYPE_ICONS[category]}</svg>'
+    return f'<span class="property-type type-{category}">{icon}<span>{escape(text)}</span></span>'
+
+
 def label(url):
     host = urlsplit(url).hostname or "Listing"
     for domain, name in [("rightmove.co.uk", "Rightmove"), ("zoopla.co.uk", "Zoopla"), ("onthemarket.com", "OnTheMarket"),
@@ -44,7 +84,8 @@ def card(p, day):
     if image_url and re.fullmatch(r"images/[a-f0-9]{64}\.jpg", image_url):
         caption = "Developer’s house-type image; appearance may vary." if p["listing_kind"] == "new_build" else ""
         photo = f'''<figure class="photo"><a href="{e(p['url'], quote=True)}" aria-label="View listing for {e(p['address'], quote=True)}"><img src="{e(image_url, quote=True)}" alt="{e(p['address'], quote=True)}" loading="lazy" decoding="async" width="640" height="427" onerror="this.closest('article').classList.remove('has-photo');this.closest('figure').remove()"></a>{f'<figcaption>{caption}</figcaption>' if caption else ''}</figure>'''
-    return f'''<article{' class="has-photo"' if photo else ''}>{photo}<div class="card-content"><div class="topline"><div class="price">£{p['price_gbp']:,}<span class="qualifier">{e(p['price_qualifier'])}</span></div><span class="facts">{p['bedrooms']} bedrooms · {e(p['property_type'])}{kind}</span></div>
+    summary = f'<div class="property-summary">{property_type_badge(p["property_type"])}<span class="facts">{p["bedrooms"]} bedrooms{kind}</span></div>'
+    return f'''<article{' class="has-photo"' if photo else ''}>{summary}{photo}<div class="card-content"><div class="topline"><div class="price">£{p['price_gbp']:,}<span class="qualifier">{e(p['price_qualifier'])}</span></div></div>
 <h3>{e(p['address'])}</h3><p class="date">{e(date_text)} · {e(p['agent'])}</p>{notes}{fallback}<nav class="links" aria-label="Listings for {e(p['address'], quote=True)}">{''.join(links)}</nav></div></article>'''
 
 
