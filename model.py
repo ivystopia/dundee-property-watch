@@ -14,6 +14,8 @@ def obj(properties):
     return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
 
+MAX_PRICE_GBP = 270_000
+
 STRING = {"type": "string"}
 NULL_STRING = {"type": ["string", "null"]}
 LINK = obj({"label": STRING, "url": STRING})
@@ -132,7 +134,7 @@ def validate_candidate(p, job, source_ids, legacy_ids, run_date):
         raise ValueError("Candidate fields do not match schema")
     if type(p["bedrooms"]) is not int or p["bedrooms"] not in {2, 3}:
         raise ValueError("Bedrooms outside 2–3")
-    if type(p["price_gbp"]) is not int or not 0 < p["price_gbp"] <= 260000:
+    if type(p["price_gbp"]) is not int or not 0 < p["price_gbp"] <= MAX_PRICE_GBP:
         raise ValueError("Price outside cap")
     if p["locality"] not in {"Dundee", "Broughty Ferry"}:
         raise ValueError("Out of area")

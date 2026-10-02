@@ -104,7 +104,7 @@ def prepare_worker(job, name, sources, history):
     (worker / "evidence").mkdir(parents=True, mode=0o700)
     ids = {source["id"] for source in sources}
     scoped = deepcopy(history)
-    for field in ("initial_pages", "last_successful_check", "previous_source_checks"):
+    for field in ("initial_pages", "last_successful_check", "previous_source_checks", "price_expansions"):
         scoped[field] = {key: value for key, value in scoped.get(field, {}).items() if key in ids}
     scoped["assigned_source_ids"] = sorted(ids)
     for records in scoped["initial_pages"].values():

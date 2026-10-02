@@ -57,7 +57,7 @@ class WatchTests(unittest.TestCase):
 
     def test_price_bedrooms_evidence_and_availability_are_enforced(self):
         self.validate(self.p)
-        for key, value in [("price_gbp", 260001), ("bedrooms", 4), ("url", "javascript:alert(1)"), ("url", "https://www.rightmove.co.uk/property-for-sale/Dundee.html"), ("url", "https://agent.example/uninspected-page"), ("evidence", [])]:
+        for key, value in [("price_gbp", 270001), ("bedrooms", 4), ("url", "javascript:alert(1)"), ("url", "https://www.rightmove.co.uk/property-for-sale/Dundee.html"), ("url", "https://agent.example/uninspected-page"), ("evidence", [])]:
             bad = deepcopy(self.p)
             bad[key] = value
             with self.assertRaises(ValueError):
@@ -87,6 +87,25 @@ class WatchTests(unittest.TestCase):
         self.assertEqual(result["new"], 0)
         self.assertEqual(result["duplicates"], 1)
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM reports").fetchone()[0], 1)
+
+    def test_expanded_budget_accepts_boundary_and_tracks_unfinished_sources(self):
+        for price in (260001, 270000):
+            p = deepcopy(self.p)
+            p["price_gbp"] = price
+            quote = f"Offers over £{price:,}"
+            p["evidence"][1]["quote"] = quote
+            self.text += " " + quote
+            self.save_evidence()
+            self.validate(p)
+        expansion = context(self.db, self.sources)["price_expansions"]
+        self.assertEqual(expansion["one"], {"min_price_gbp": 260001, "max_price_gbp": 270000})
+        self.ingest("invalid-expansion", self.result({**p, "price_gbp": 270001}))
+        self.assertIn("one", context(self.db, self.sources)["price_expansions"])
+        self.ingest("expanded", self.result(p))
+        pending = context(self.db, self.sources)["price_expansions"]
+        self.assertNotIn("one", pending)
+        self.assertIn("two", pending)
+        self.assertIn("Up to £270,000", render(self.db, self.root / "site").read_text())
 
     def test_failed_source_keeps_cutoff_for_catchup(self):
         self.ingest("r1", self.result())

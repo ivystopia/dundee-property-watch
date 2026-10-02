@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-from model import canonical_url, identities, merge_property_data, normalize, property_id, same_addressed_home, validate_candidate
+from model import MAX_PRICE_GBP, canonical_url, identities, merge_property_data, normalize, property_id, same_addressed_home, validate_candidate
 
 
 def now():
@@ -28,6 +28,8 @@ def connect(state):
         CREATE TABLE IF NOT EXISTS source_checks (
             run_id TEXT REFERENCES runs(id), source_id TEXT, status TEXT, detail TEXT, urls TEXT,
             PRIMARY KEY(run_id, source_id));
+        CREATE TABLE IF NOT EXISTS source_price_coverage (
+            source_id TEXT PRIMARY KEY, max_price_gbp INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS properties (
             id TEXT PRIMARY KEY, data TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS aliases (
@@ -134,7 +136,13 @@ def context(db, sources):
               for row in db.execute("SELECT * FROM legacy")]
     cutoffs = {}
     previous_checks = {}
+    price_expansions = {}
     for source in sources:
+        scope = db.execute("SELECT max_price_gbp FROM source_price_coverage WHERE source_id=?", (source["id"],)).fetchone()
+        # Runs before the September 2026 budget increase used a £260,000 cap.
+        previous_cap = scope[0] if scope else 260000
+        if previous_cap < MAX_PRICE_GBP:
+            price_expansions[source["id"]] = {"min_price_gbp": previous_cap + 1, "max_price_gbp": MAX_PRICE_GBP}
         row = db.execute("""SELECT MAX(r.started) AS cutoff FROM source_checks s JOIN runs r ON r.id=s.run_id
                             WHERE s.source_id=? AND s.status='complete' AND r.status IN ('complete','partial')""", (source["id"],)).fetchone()
         cutoffs[source["id"]] = row["cutoff"]
@@ -144,6 +152,7 @@ def context(db, sources):
             previous_checks[source["id"]] = {**dict(latest), "urls": json.loads(latest["urls"])}
     inventory = {row["url"]: row["first_seen"] for row in db.execute("SELECT url,first_seen FROM inventory")}
     return {"previous_properties": previous, "legacy_reports": legacy, "last_successful_check": cutoffs,
+            "max_price_gbp": MAX_PRICE_GBP, "price_expansions": price_expansions,
             "previous_inventory_urls": inventory,
             "previous_source_checks": previous_checks}
 
@@ -239,5 +248,8 @@ def ingest(db, result, job, sources, run_id, day, started):
         if all(c["status"] == "failed" for c in checks):
             status = "failed"
         remember_inventory(db, job, started)
+        # Partial checks must keep the newly eligible band pending for recovery.
+        for check in db.execute("SELECT source_id FROM source_checks WHERE run_id=? AND status='complete'", (run_id,)).fetchall():
+            db.execute("INSERT INTO source_price_coverage VALUES (?,?) ON CONFLICT(source_id) DO UPDATE SET max_price_gbp=MAX(max_price_gbp,excluded.max_price_gbp)", (check[0], MAX_PRICE_GBP))
         db.execute("UPDATE runs SET finished=?,status=? WHERE id=?", (now(), status, run_id))
     return {"new": accepted, "duplicates": duplicates, "rejected": rejected, "status": status}
