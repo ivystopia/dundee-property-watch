@@ -4,6 +4,8 @@ Run daily at 08:00 Europe/London as a standalone local Codex scheduled task, sta
 
 The selected backend is recorded in the saved automation prompt. Both backends preserve the existing private history and public webpage. Python alone validates evidence, deduplicates homes, writes history, caches thumbnails and publishes GitHub Pages.
 
+The automation belongs to the Personal project and operates independently of the setup conversation. Its state lives in this repository and the private state directory. Do not create verification heartbeats or follow-ups tied to the setup chat. Complete waiting, retry and publication verification within each standalone Scheduled run; report the first unattended run's verified outcome in its own Scheduled chat.
+
 ## Native workflow
 
 1. From `/home/ivy/repos/personal/dundee-property-watch`, run `/usr/bin/python3 native_job.py prepare`. This short stage retries any pending publication, skips an already-published day, or returns a private job and manifest path. A `busy` result means another run owns the state; exit without duplicating work. The lease lasts at most 50 minutes and survives separate tool calls. No Python supervisor waits during native research.
