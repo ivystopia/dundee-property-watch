@@ -1,15 +1,15 @@
 # Dundee property watch
 
-A local daily research job produces the public report at https://ivystopia.github.io/dundee-property-watch/. The archive grows with each day's new properties, newest first, with 20 entries per page and horizontal Newer/Older navigation. Earlier entries never expire. Each property has original-agent and portal links, and a locally served thumbnail where available. Source diagnostics and research evidence remain private.
+A daily Codex scheduled task produces the public report at https://ivystopia.github.io/dundee-property-watch/. The archive grows with each day's new properties, newest first, with 20 entries per page and horizontal Newer/Older navigation. Earlier entries never expire. Each property has original-agent and portal links, and a locally served thumbnail where available. Source diagnostics and research evidence remain private.
 
 The watch covers Dundee and Broughty Ferry, exactly 2–3 bedrooms, and advertised asking/guide prices up to £270,000. `sources.json` contains all 24 discovery sources and their search instructions. `criteria.md` holds the current search and presentation rules. Existing homes, price changes and cross-portal duplicates are not reannounced. Older listings first discovered by this watch are labelled honestly; a first-seen date is not an original listing date.
 
 ## Runtime
 
-- Python 3.11+ with Beautiful Soup and Pillow (`python3-bs4` and `python3-pil` on Debian), curl, Git, the authenticated GitHub CLI (`gh`) and the authenticated Codex CLI are required. Optional rendered-page research uses the existing browse-with-firefox skill/runtime.
+- Python 3.11+ with Beautiful Soup and Pillow (`python3-bs4` and `python3-pil` on Debian), curl, Git and the authenticated GitHub CLI (`gh`) are required. Native execution uses the Codex desktop app and its subagents. The CLI is retained for the fallback backend and manual runs. Rendered-page research uses the existing browse-with-firefox skill/runtime.
 - Three independent research workers each handle eight assigned sources concurrently, balancing portals, agents, auctioneers and builders. Each gets its own workspace, filtered source history, copied initial snapshots and private logs. Workers cannot delegate recursively. Their results and evidence are merged before central validation, database writes, deduplication and publishing; one failed worker does not discard another’s findings.
-- The researcher uses the model and reasoning level from `settings.json` (initially GPT-6 Astra, high), live web search and a workspace-write sandbox with network access. It uses the existing ChatGPT login, not a separately billed API key. It does not inherit general user MCP/plugin configuration or arbitrary credential environment variables.
-- State is in `/home/ivy/.local/state/dundee-property-watch/`, with a SQLite database, process lock and private run directories. The state directory and files are owner-only. Back up this directory to preserve deduplication history.
+- The scheduled parent and researchers use GPT-6.1 Sol, high reasoning and Standard speed, with the research settings recorded in `settings.json` and each private run. Native workers start with fresh contexts and receive compact historical identities, source-specific cutoffs and prior routes; stale evidence quotes are omitted. CLI researchers retain their existing isolated configuration. Both use the ChatGPT plan; no API key or API billing is required.
+- State is in `/home/ivy/.local/state/dundee-property-watch/`, with a SQLite database, process lock, durable native-run leases and private run directories. Short preparation and finalization stages hold the process lock; a lease prevents competing jobs between those stages. Interrupted leases expire and preserve earlier public reports. State and evidence are owner-only. Back up this directory to preserve deduplication history.
 - Research receives prior property records, imported historical hints and per-source last-successful cutoffs. Failed or partial source checks do not advance those cutoffs. Use a minimum three-day overlap, wider after missed checks. A page fetch alone is never proof of complete inventory coverage.
 - Per-source price coverage tracks the increase from £260,000 to £270,000. Until a source completes catch-up, research prioritizes all currently available homes in £260,001–£270,000, including older inventory. Previously reported homes still deduplicate normally; incomplete expansion coverage remains pending for later runs.
 - Public-page evidence is saved with `fetch.py`. One optional SOCKS retry is available with `--tor`, using the optional `DUNDEE_TOR_PROXY` environment variable. Neither retrying nor a successful HTTP response proves a complete source check.
@@ -43,26 +43,33 @@ The import seeds deduplication hints; it does not present historical ChatGPT cla
 
 `run` performs a manual check and generates the local page. Add `--publish` to publish a completed run. Each of the three workers targets five minutes of research and has a ten-minute hard research limit. The whole job retains one process lock, and validates a saved checkpoint if the time limit is reached. Each worker writes its result to its own local JSON file instead of repeating a large result in the final model response. A research failure retains the previous report; a publication failure leaves a completed report pending for retry. Each candidate and source check can be inspected in the private database and per-run JSON files.
 
+`run --research-backend cli` is the default. `run --research-backend native` prepares a leased job and returns its assignment manifest for a native Codex coordinator; the coordinator launches workers and calls `native_job.py finalize` as described below. The native entry point completes preparation without keeping a Python supervisor running during research.
+
 ## Schedule
 
-After validating a manual run and publication:
+The standalone local Codex automation runs daily at **08:00 Europe/London**, with a fresh chat for each run in Scheduled. Keep the computer on and the desktop app running. The existing local Personal project supplies the execution host; the saved prompt explicitly targets `/home/ivy/repos/personal/dundee-property-watch`. Read `scheduled-task.md` for the complete coordinator workflow.
+
+Native execution uses short durable stages rather than keeping a Python supervisor running while agents work:
 
 ```sh
-python3 install_timer.py
-systemctl --user status dundee-property-watch.timer
-journalctl --user -u dundee-property-watch.service
+python3 native_job.py prepare
+python3 native_job.py start-worker /absolute/private/worker/job
+python3 native_complete.py /absolute/private/worker/job
+python3 native_job.py finalize /absolute/private/run/job
 ```
 
-The service loads optional machine-specific values from `~/.config/dundee-property-watch.env`. The existing SOCKS retry endpoint is retained there, outside the public repository. Manual research/helper calls read the same configuration automatically; an explicit `DUNDEE_TOR_PROXY` in the shell overrides it. No secret or private host configuration is embedded in the public code.
+Codex launches three fresh research subagents between preparation and finalization. Each targets five minutes, has a ten-minute deadline and seals its result plus evidence before completion. The coordinator interrupts overdue workers and can finalize their saved checkpoints. Python validates and ingests the merged results, renders the permanent archive and publishes through the existing GitHub Pages publisher. Finalization is idempotent; publication retries never repeat ingestion. An already-published day skips research. The CLI fallback remains `python3 watch.py run --publish --scheduled`.
 
-The user timer runs at 08:00 Europe/London, automatically following BST/GMT. `Persistent=true` catches up when the user service manager starts after downtime; a sleeping machine checks after resume. It does not wake a powered-off machine or start before the user's service manager is available. The scheduled command skips a day already successfully published, including after a publication retry. A failed service retries once after 15 minutes within its start-limit window.
+The parent allows one fatal-failure retry after 15 minutes within the 50-minute scheduled-run budget. A partial-source report is a successful outcome. If the app or computer was unavailable, the next actual run uses wider overlapping lookbacks and unchanged incomplete-source cutoffs; immediate catch-up on reopening the app is not promised.
 
-No Codex desktop app or open terminal is required: systemd starts three fresh, concurrent `codex exec` processes for each research run. This is independent of the existing phone remote-control service. Ivy's account already has systemd lingering enabled, so its user services can start at boot and continue after logout.
+Pause or run the task through Codex Scheduled. The former systemd timer and installed units are retained disabled for rollback, with timestamped backups beside the originals. Re-enable the old timer only after pausing the Codex automation to prevent duplicate scheduling. The process lock and native lease also guard overlapping manual invocations.
 
-Pause with `systemctl --user disable --now dundee-property-watch.timer`. This does not interrupt a current run. Stop an active run with `systemctl --user stop dundee-property-watch.service`; interrupted research is marked failed on the next run.
+`fetch.py` still reads the optional private proxy configuration at `/home/ivy/.config/dundee-property-watch.env`, so it no longer depends on a service loading that file. Explicit `DUNDEE_TOR_PROXY` values override it. Machine-specific configuration is never placed in the repository.
 
-The previous ChatGPT watch is intentionally left in place for a short comparison period. Its manual results from 16 September 2026 are included in the imported baseline. Remove the old watch separately after comparing the outputs.
+Architecture benchmarks use `benchmark.py` and isolated databases and output below the private state directory. They cannot publish pages or write to production history. Matched trials share pre-run history and entry snapshots; follow-up pages remain live. Account allowance percentages are the usage measure, with token/cache totals only supporting diagnostics. API or purchased-credit rates are not conversions for included-plan allowance.
+
+The 6 October architecture comparison selected native research: all three native trials retained the nine pooled verified discoveries, while CLI trials retained eight, eight and five. Each complete trial showed one percentage point of weekly allowance use. The global integer meter and concurrent coordination make the precise usage comparison inconclusive; the user's preference for native when quality holds decided the cutover. The full comparison and evidence remain in the private state directory.
 
 ## Model and reasoning
 
-Edit `/home/ivy/repos/personal/dundee-property-watch/settings.json` to choose the model and `reasoning_effort` for subsequent runs. No service reload is needed. `max_concurrent_research` defaults to 3; set it to 1 or 2 to reduce simultaneous usage, at the cost of running some of the three source groups sequentially. The initial setting is `gpt-6-astra` with `high` effort, independent of interactive CLI preferences. Astra's documented levels are `low`, `medium`, `high`, `xhigh` and `max`; see https://developers.openai.com/api/docs/models/gpt-6-astra. `high` is the initial choice for multi-source research and ambiguous identities. `medium` is a useful later comparison if runtime or usage becomes a concern. Increasing effort cannot fix blocked websites or missing listing dates. Each run saves its selected settings privately beside its evidence.
+Edit `/home/ivy/repos/personal/dundee-property-watch/settings.json` to choose researcher model, reasoning effort and concurrency for subsequent runs. The current setting is `gpt-6.1-sol` with `high` effort. Keep the automation's parent model and effort consistent when changing researcher settings. `max_concurrent_research` defaults to 3; 1 or 2 runs the source groups sequentially. Increasing effort cannot fix blocked websites or missing listing dates. Each run saves its selected settings privately beside its evidence. The 2 October model benchmark selected Sol high; the architecture benchmark separately compares CLI and native orchestration using actual account allowance observations.

@@ -25,6 +25,9 @@ def connect(state):
         CREATE TABLE IF NOT EXISTS runs (
             id TEXT PRIMARY KEY, started TEXT NOT NULL, finished TEXT,
             day TEXT NOT NULL, status TEXT NOT NULL, error TEXT, published TEXT);
+        CREATE TABLE IF NOT EXISTS native_leases (
+            run_id TEXT PRIMARY KEY REFERENCES runs(id), job TEXT NOT NULL,
+            deadline REAL NOT NULL, status TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS source_checks (
             run_id TEXT REFERENCES runs(id), source_id TEXT, status TEXT, detail TEXT, urls TEXT,
             PRIMARY KEY(run_id, source_id));

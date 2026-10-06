@@ -14,6 +14,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 from zoneinfo import ZoneInfo
 
 from fetch import fetch
@@ -28,6 +31,43 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT
 DEFAULT_STATE = Path.home() / ".local/state/dundee-property-watch"
 SITE = ROOT / "site"
+_processes = set()
+_process_lock = threading.Lock()
+
+
+def atomic_json(path, value):
+    """Publish a complete JSON document without exposing a partial write."""
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump(value, handle, indent=2)
+        handle.write("\n")
+    try:
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def stop_processes():
+    with _process_lock:
+        for process in list(_processes):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def worker_prompt(job, config, native=False):
+    prompt = (ROOT / "research.md").read_text().replace("{FETCH_HELPER}", str(ROOT / "fetch.py")).replace("{BROWSER_SKILL}", str(Path.home() / ".codex/skills/browse-with-firefox/SKILL.md"))
+    prompt += f"\nJOB={job}\nRead context.json, sources.json, schema.json and criteria.md in JOB. Current UTC time: {now()}. Research budget: {config['research_budget_minutes']} minutes. Prioritize finishing within this budget.\n"
+    if native:
+        prompt += ("\nYou are one native research subagent. You are not alone; other workers own other directories. "
+                   "Your only write ownership is JOB. Do not revert anyone else's work. Do not spawn agents. "
+                   "Before writing a checkpoint or evidence, check that native-closed.json does not exist. "
+                   "Use Python's standard-library json and atomic rename for checkpoints; do not install or rely on optional validators such as jsonschema. "
+                   "The central finalizer validates the schema and evidence. "
+                   "When finished, run python3 /home/ivy/repos/personal/dundee-property-watch/native_complete.py JOB, which seals the checkpoint "
+                   "and writes its completion marker. The helper refuses late completion. Do not write the marker yourself.\n")
+    return prompt
 
 
 def log(text):
@@ -55,31 +95,39 @@ def research_worker(job, config):
                "--ignore-user-config", "--skip-git-repo-check", "--sandbox", "workspace-write",
                "-c", "sandbox_workspace_write.network_access=true", "-c", 'web_search="live"',
                "-c", f'model_reasoning_effort="{effort}"', "-c", "features.multi_agent=false",
+               "-c", 'service_tier="default"',
                "--cd", str(job), "--json", "--output-last-message", str(job / "completion.txt")]
     if config.get("model"):
         command.extend(["--model", config["model"]])
     (job / "settings.json").write_text(json.dumps(config, indent=2) + "\n")
-    prompt = (ROOT / "research.md").read_text().replace("{FETCH_HELPER}", str(ROOT / "fetch.py")).replace("{BROWSER_SKILL}", str(Path.home() / ".codex/skills/browse-with-firefox/SKILL.md")) + f"\nJOB={job}\nRead context.json, sources.json, schema.json and criteria.md in JOB. Current UTC time: {now()}. Research budget: {config['research_budget_minutes']} minutes. Prioritize finishing within this budget.\n"
+    prompt = worker_prompt(job, config)
     command.append("-")
     # The researcher doesn't need AWS credentials or arbitrary inherited secret variables.
     env = {k: v for k, v in os.environ.items() if k in {"HOME", "USER", "LOGNAME", "PATH", "LANG", "LC_ALL", "TZ", "CODEX_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "DUNDEE_TOR_PROXY"}}
     with (job / "events.jsonl").open("w") as events, (job / "codex.stderr").open("w") as errors:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=events, stderr=errors, text=True,
                                    env=env, start_new_session=True)
+        atomic_json(job / "process.json", {"pid": process.pid, "worker": str(job), "started_at": now()})
+        with _process_lock:
+            _processes.add(process)
         try:
-            process.communicate(prompt, timeout=config["research_timeout_seconds"])
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGTERM)
             try:
-                process.wait(timeout=10)
+                process.communicate(prompt, timeout=config["research_timeout_seconds"])
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            checkpoint = job / "research-result.json"
-            if checkpoint.exists():
-                log("Research time limit reached; validating saved checkpoint")
-                return json.loads(checkpoint.read_text())
-            raise RuntimeError("Research time limit reached without a saved checkpoint")
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                checkpoint = job / "research-result.json"
+                if checkpoint.exists():
+                    log("Research time limit reached; validating saved checkpoint")
+                    return json.loads(checkpoint.read_text())
+                raise RuntimeError("Research time limit reached without a saved checkpoint")
+        finally:
+            with _process_lock:
+                _processes.discard(process)
         if process.returncode:
             raise RuntimeError(f"Codex research failed (exit {process.returncode}); inspect private run logs")
     return json.loads((job / "research-result.json").read_text())
@@ -125,7 +173,7 @@ def prepare_worker(job, name, sources, history):
     return worker
 
 
-def merge_worker(job, worker, sources, result):
+def merge_worker(job, worker, sources, result, destination_name=None):
     """Validate ownership and copy isolated evidence into the central run."""
     result = deepcopy(result)
     ids = {source["id"] for source in sources}
@@ -138,7 +186,7 @@ def merge_worker(job, worker, sources, result):
         if not isinstance(check["urls"], list) or not all(isinstance(url, str) for url in check["urls"]):
             raise ValueError("Invalid worker source-check URLs")
     evidence_root = (worker / "evidence").resolve()
-    destination = job / "evidence" / worker.name
+    destination = job / "evidence" / (destination_name or worker.name)
     for candidate in result["candidates"]:
         if not candidate["source_ids"] or not set(candidate["source_ids"]) <= ids:
             raise ValueError("Worker candidate claims an unassigned discovery source")
@@ -158,8 +206,8 @@ def merge_worker(job, worker, sources, result):
     return result
 
 
-def research(job):
-    config = json.loads((ROOT / "settings.json").read_text())
+def research(job, config=None):
+    config = config or json.loads((ROOT / "settings.json").read_text())
     concurrency = config.get("max_concurrent_research", 3)
     if type(concurrency) is not int or not 1 <= concurrency <= 3:
         raise ValueError("max_concurrent_research must be between 1 and 3")
@@ -184,9 +232,10 @@ def research(job):
     merged = {"candidates": [], "source_checks": []}
     log(f"Starting {len(assignments)} research workers, at most {concurrency} concurrently")
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        for result in pool.map(work, assignments):
-            merged["candidates"].extend(result["candidates"])
-            merged["source_checks"].extend(result["source_checks"])
+        outputs = list(pool.map(work, assignments))
+    for result in outputs:
+        merged["candidates"].extend(result["candidates"])
+        merged["source_checks"].extend(result["source_checks"])
     if len(merged["source_checks"]) != len(sources) or {check["source_id"] for check in merged["source_checks"]} != {source["id"] for source in sources}:
         raise ValueError("Merged research does not cover the source registry exactly once")
     temporary = job / "research-result.tmp"
@@ -252,19 +301,41 @@ def run(db, state, should_publish, scheduled=False):
 
 
 def main():
+    global SITE
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE)
+    parser.add_argument("--site", type=Path, default=SITE, help="Generated output directory (use an isolated path for benchmarks)")
     sub = parser.add_subparsers(dest="command", required=True)
     imp = sub.add_parser("import", help="Import historical reports without publishing them as current listings")
     imp.add_argument("export", type=Path)
     runner = sub.add_parser("run")
     runner.add_argument("--publish", action="store_true")
     runner.add_argument("--scheduled", action="store_true", help="Skip research if today's report is already published")
+    runner.add_argument("--research-backend", choices=("cli", "native"), default="cli",
+                        help="cli runs to completion; native prepares leased assignments for the Codex coordinator")
+    runner.add_argument("--overall-timeout-seconds", type=int, default=3000)
     sub.add_parser("render")
     sub.add_parser("publish")
     sub.add_parser("status")
     args = parser.parse_args()
+    SITE = args.site
+    if args.command == "run":
+        if args.overall_timeout_seconds <= 0:
+            parser.error("overall timeout must be positive")
+        def expired(signum, frame):
+            stop_processes()
+            raise TimeoutError("Overall property-watch deadline reached")
+        signal.signal(signal.SIGALRM, expired)
+        signal.alarm(args.overall_timeout_seconds)
+        if args.research_backend == "native":
+            from native_job import prepare
+            try:
+                print(json.dumps(prepare(args.state, SITE, scheduled=args.scheduled, should_publish=args.publish,
+                                         overall_timeout_seconds=args.overall_timeout_seconds)), flush=True)
+            finally:
+                signal.alarm(0)
+            return 0
     args.state.mkdir(parents=True, mode=0o700, exist_ok=True)
     with (args.state / "watch.lock").open("w") as lock:
         try:
@@ -274,6 +345,11 @@ def main():
             return 0
         db = connect(args.state)
         try:
+            from native_job import recover_leases, active_lease
+            recover_leases(db)
+            if args.command != "status" and active_lease(db):
+                log("A native scheduled run owns the active lease; skipping")
+                return 0
             if args.command == "import":
                 log(f"Imported {import_export(db, args.export)} historical property hints")
             elif args.command == "run":
@@ -289,6 +365,8 @@ def main():
                 print("Known properties:", db.execute("SELECT COUNT(*) FROM properties").fetchone()[0])
         finally:
             db.close()
+            signal.alarm(0)
+            stop_processes()
     return 0
 
 
