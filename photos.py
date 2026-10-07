@@ -228,12 +228,16 @@ def discover_photo(property_data, deadline):
     return None, None
 
 
-def enrich_photos(db, day=None):
+def enrich_photos(db, day=None, *, retry_failed=False):
     """Cache successful and unsuccessful attempts; SQLite stays on this thread."""
     with db:
         db.execute("""CREATE TABLE IF NOT EXISTS photos (
             property_id TEXT PRIMARY KEY REFERENCES properties(id),
             image_url TEXT, page_url TEXT, checked_at TEXT NOT NULL)""")
+        if retry_failed:
+            if day is None:
+                raise ValueError("Explicit thumbnail retry requires a report day")
+            db.execute("DELETE FROM photos WHERE image_url IS NULL AND property_id IN (SELECT property_id FROM reports WHERE day=?)", (day,))
     query = """SELECT p.id,p.data FROM properties p
                WHERE NOT EXISTS (SELECT 1 FROM photos f WHERE f.property_id=p.id)
                AND EXISTS (SELECT 1 FROM reports r WHERE r.property_id=p.id"""

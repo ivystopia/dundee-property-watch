@@ -188,6 +188,53 @@ def remember_inventory(db, job, started):
         db.execute("INSERT INTO inventory VALUES (?,?,?) ON CONFLICT(url) DO UPDATE SET last_seen=excluded.last_seen", (key, started, started))
 
 
+def reconcile_current_aliases(db, run_id, urls):
+    """Merge an explicitly verified alias pair from this run, never older history.
+
+    The coordinator must validate saved cross-portal identity evidence first.
+    Street-only resemblance is deliberately insufficient for normal ingestion.
+    """
+    run = db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+    if not run or run["status"] not in {"complete", "partial"}:
+        raise ValueError("Reconciliation requires a completed run")
+    rows = []
+    for url in urls:
+        row = db.execute("SELECT p.* FROM properties p JOIN aliases a ON a.property_id=p.id WHERE a.alias=?",
+                         ("url:" + canonical_url(url),)).fetchone()
+        if not row:
+            raise ValueError("Reconciliation URL is not a stored identity")
+        rows.append(row)
+    if rows[0]["id"] == rows[1]["id"]:
+        return False
+    data = [json.loads(row["data"]) for row in rows]
+    for field in ("address", "locality", "agent", "bedrooms", "price_gbp", "property_type", "plot_number"):
+        if data[0].get(field) != data[1].get(field):
+            raise ValueError("Conflicting property facts need review")
+    if data[0].get("postcode") and data[1].get("postcode") and data[0]["postcode"] != data[1]["postcode"]:
+        raise ValueError("Conflicting postcodes need review")
+    for row in rows:
+        days = [r[0] for r in db.execute("SELECT day FROM reports WHERE property_id=?", (row["id"],))]
+        if row["first_seen"] < run["started"] or days != [run["day"]]:
+            raise ValueError("Reconciliation must not alter earlier historical entries")
+    keep, remove = rows
+    merged = merge_property_data(data[0], data[1])
+    archived = [json.loads(db.execute("SELECT data FROM reports WHERE property_id=?", (row["id"],)).fetchone()[0]) for row in rows]
+    report = merge_property_data(archived[0], archived[1])
+    with db:
+        db.execute("UPDATE properties SET data=?,last_seen=? WHERE id=?", (json.dumps(merged), max(r["last_seen"] for r in rows), keep["id"]))
+        db.execute("UPDATE reports SET data=? WHERE property_id=?", (json.dumps(report), keep["id"]))
+        db.execute("DELETE FROM reports WHERE property_id=?", (remove["id"],))
+        db.execute("UPDATE aliases SET property_id=? WHERE property_id=?", (keep["id"], remove["id"]))
+        db.execute("UPDATE legacy SET matched_property_id=? WHERE matched_property_id=?", (keep["id"], remove["id"]))
+        photo = db.execute("SELECT * FROM photos WHERE property_id=? AND image_url IS NOT NULL", (remove["id"],)).fetchone()
+        if photo and not db.execute("SELECT 1 FROM photos WHERE property_id=? AND image_url IS NOT NULL", (keep["id"],)).fetchone():
+            db.execute("INSERT OR REPLACE INTO photos VALUES (?,?,?,?)", (keep["id"], photo["image_url"], photo["page_url"], photo["checked_at"]))
+        db.execute("DELETE FROM photos WHERE property_id=?", (remove["id"],))
+        db.execute("DELETE FROM properties WHERE id=?", (remove["id"],))
+        db.execute("UPDATE runs SET published=NULL WHERE id=?", (run_id,))
+    return True
+
+
 def ingest(db, result, job, sources, run_id, day, started):
     source_ids = {s["id"] for s in sources}
     checks = result.get("source_checks", [])
