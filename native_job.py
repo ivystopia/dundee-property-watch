@@ -212,7 +212,8 @@ def finalize(job, *, allow_checkpoints=False):
         sources = json.loads((job / "sources.json").read_text())
         run = db.execute("SELECT status FROM runs WHERE id=?", (manifest["run_id"],)).fetchone()
         if run["status"] in {"complete", "partial"}:
-            counts = {"new": db.execute("SELECT COUNT(*) FROM reports WHERE day=?", (history["report_day"],)).fetchone()[0],
+            counts = {"new": db.execute("SELECT COUNT(*) FROM reports WHERE day=? AND json_extract(data,'$.previous_price_gbp') IS NULL", (history["report_day"],)).fetchone()[0],
+                      "price_changes": db.execute("SELECT COUNT(*) FROM reports WHERE day=? AND json_extract(data,'$.previous_price_gbp') IS NOT NULL", (history["report_day"],)).fetchone()[0],
                       "duplicates": None, "rejected": db.execute("SELECT COUNT(*) FROM rejected WHERE run_id=?", (manifest["run_id"],)).fetchone()[0], "status": run["status"]}
         else:
             counts = ingest(db, result, job, sources, manifest["run_id"], history["report_day"], history["started"])

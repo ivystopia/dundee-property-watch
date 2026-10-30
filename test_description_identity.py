@@ -63,6 +63,22 @@ class DescriptionIdentityTests(unittest.TestCase):
         path.write_text(path.read_text().replace("apple trees", "pear trees"))
         self.assertEqual(self.ingest("one", pair)["new"], 2)
 
+    def test_changed_price_keeps_description_identity_and_reappears(self):
+        pair = self.pair()
+        self.ingest("one", pair[:1], day="2020-01-01")
+        p = pair[1]
+        p["price_gbp"] = 160000
+        path = self.job / p["evidence"][0]["file"]
+        path.write_text(path.read_text().replace("170,000", "160,000"))
+        for item in p["evidence"]:
+            item["quote"] = item["quote"].replace("170,000", "160,000")
+        counts = self.ingest("two", [p])
+        self.assertEqual((counts["new"], counts["price_changes"]), (0, 1))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM properties").fetchone()[0], 1)
+        reports = [json.loads(row[0]) for row in self.db.execute("SELECT data FROM reports ORDER BY day")]
+        self.assertEqual([p["price_gbp"] for p in reports], [170000, 160000])
+        self.assertEqual(reports[1]["previous_price_gbp"], 170000)
+
     def test_conflicting_postcodes_stay_separate(self):
         pair = self.pair()
         pair[0]["postcode"], pair[1]["postcode"] = "DD3 0AA", "DD3 0AB"

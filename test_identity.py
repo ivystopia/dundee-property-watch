@@ -84,7 +84,7 @@ class MissingPostcodeTests(unittest.TestCase):
         self.assertEqual(self.db.execute("SELECT day FROM reports").fetchone()[0], "2020-01-01")
         self.assertEqual(self.ingest("three", [self.agent, self.portal])["new"], 0)
 
-    def test_link_enrichment_preserves_original_report_price(self):
+    def test_price_change_reannounces_and_preserves_original_report_price(self):
         self.ingest("one", [self.agent], day="2020-01-01")
         self.portal["price_gbp"] = 160000
         evidence = self.job / "evidence/portal.json"
@@ -92,8 +92,10 @@ class MissingPostcodeTests(unittest.TestCase):
         for item in self.portal["evidence"]:
             item["quote"] = item["quote"].replace("170,000", "160,000")
         counts = self.ingest("two", [self.portal])
-        self.assertEqual(counts["new"], 0)
-        archived = json.loads(self.db.execute("SELECT data FROM reports").fetchone()[0])
+        self.assertEqual((counts["new"], counts["price_changes"]), (0, 1))
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM properties").fetchone()[0], 1)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM reports").fetchone()[0], 2)
+        archived = json.loads(self.db.execute("SELECT data FROM reports ORDER BY day LIMIT 1").fetchone()[0])
         self.assertEqual(archived["price_gbp"], 170000)
         self.assertIn(self.portal["url"], [link["url"] for link in archived["additional_urls"]])
 

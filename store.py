@@ -270,7 +270,7 @@ def ingest(db, result, job, sources, run_id, day, started):
     if any(c["status"] not in {"complete", "partial", "failed"} or not c["detail"].strip() for c in checks):
         raise ValueError("Invalid source-check status")
     legacy_ids = {r[0] for r in db.execute("SELECT id FROM legacy")}
-    accepted = duplicates = rejected = 0
+    accepted = price_changes = duplicates = rejected = 0
     with db:
         for check in checks:
             db.execute("INSERT INTO source_checks VALUES (?,?,?,?,?)", (run_id, check["source_id"], check["status"], check["detail"], json.dumps(check["urls"])))
@@ -295,8 +295,21 @@ def ingest(db, result, job, sources, run_id, day, started):
                             for row in db.execute("SELECT first_seen FROM inventory WHERE url=?", (key[4:],))]
                 first_seen = min([started, *observed])
                 old = db.execute("SELECT data FROM properties WHERE id=?", (identity,)).fetchone()
+                latest_report = db.execute("SELECT day,data FROM reports WHERE property_id=? ORDER BY day DESC LIMIT 1", (identity,)).fetchone()
+                previous = (json.loads(latest_report["data"]) if latest_report else
+                            json.loads(old[0]) if old else None)
+                if previous is None and candidate["prior_report_id"]:
+                    previous = json.loads(db.execute("SELECT data FROM legacy WHERE id=?", (candidate["prior_report_id"],)).fetchone()[0])
+                price_changed = (previous is not None and previous.get("price_gbp") != candidate["price_gbp"]
+                                 and isinstance(previous.get("price_gbp"), int)
+                                 and (latest_report is None or latest_report["day"] < day))
                 if old:
                     candidate = merge_property_data(json.loads(old[0]), candidate)
+                # A second worker's differing quote must not replace the price
+                # already reported today or create another announcement.
+                if latest_report and latest_report["day"] == day:
+                    candidate["price_gbp"] = previous["price_gbp"]
+                    candidate["price_qualifier"] = previous["price_qualifier"]
                 db.execute("""INSERT INTO properties VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE
                               SET data=excluded.data,last_seen=excluded.last_seen""", (identity, json.dumps(candidate), first_seen, started))
                 for key in keys:
@@ -306,7 +319,6 @@ def ingest(db, result, job, sources, run_id, day, started):
                 if candidate["prior_report_id"]:
                     db.execute("UPDATE legacy SET matched_property_id=? WHERE id=?", (identity, candidate["prior_report_id"]))
                 if old or candidate["prior_report_id"]:
-                    duplicates += 1
                     # Attach newly found listing links to the original archive entry,
                     # retaining its report day and historical price/description.
                     for report in db.execute("SELECT day,data FROM reports WHERE property_id=?", (identity,)).fetchall():
@@ -317,6 +329,12 @@ def ingest(db, result, job, sources, run_id, day, started):
                         for key in ("postcode", "listed_date"):
                             archived[key] = archived[key] or enriched[key]
                         db.execute("UPDATE reports SET data=? WHERE day=? AND property_id=?", (json.dumps(archived), report["day"], identity))
+                    if price_changed:
+                        report = {**candidate, "previous_price_gbp": previous["price_gbp"]}
+                        db.execute("INSERT INTO reports VALUES (?,?,?)", (day, identity, json.dumps(report)))
+                        price_changes += 1
+                    else:
+                        duplicates += 1
                 else:
                     db.execute("INSERT INTO reports VALUES (?,?,?)", (day, identity, json.dumps(candidate)))
                     accepted += 1
@@ -333,4 +351,4 @@ def ingest(db, result, job, sources, run_id, day, started):
         for check in db.execute("SELECT source_id FROM source_checks WHERE run_id=? AND status='complete'", (run_id,)).fetchall():
             db.execute("INSERT INTO source_price_coverage VALUES (?,?) ON CONFLICT(source_id) DO UPDATE SET max_price_gbp=MAX(max_price_gbp,excluded.max_price_gbp)", (check[0], MAX_PRICE_GBP))
         db.execute("UPDATE runs SET finished=?,status=? WHERE id=?", (now(), status, run_id))
-    return {"new": accepted, "duplicates": duplicates, "rejected": rejected, "status": status}
+    return {"new": accepted, "price_changes": price_changes, "duplicates": duplicates, "rejected": rejected, "status": status}

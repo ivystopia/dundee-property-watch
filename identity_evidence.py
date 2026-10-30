@@ -56,7 +56,8 @@ def description_fingerprints(candidate, job):
 
 def corroborating_facts(left, right):
     """A shared description alone never overrides conflicting property facts."""
-    for field in ("address", "locality", "agent", "bedrooms", "price_gbp", "property_type", "listing_kind", "plot_number"):
+    # Price is an observation, not an identity: the same home can be relisted.
+    for field in ("address", "locality", "agent", "bedrooms", "property_type", "listing_kind", "plot_number"):
         a, b = left.get(field), right.get(field)
         if isinstance(a, str) and isinstance(b, str):
             a, b = normalize(a), normalize(b)
