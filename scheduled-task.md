@@ -15,7 +15,7 @@ The automation belongs to the Personal project and operates independently of the
 
 The scheduled parent does not read the full property history or research listings itself; only workers read their scoped context. Keep tool output compact. Never write to the database or publication branch directly.
 
-Preparation, evidence retrieval and publication need public network access; the publisher also uses the existing GitHub CLI login. If a tool sandbox explicitly blocks the authorized command, rerun that stage with host escalation and a precise justification. Never redirect or copy authentication state to work around a blocked command. A remote website's HTTP 403 is a source limitation, not a reason for repeated escalation or retries.
+Preparation, evidence retrieval and publication need public network access. Publication uses an ordinary Git push with the repository's existing SSH or HTTPS authentication; do not require a GitHub CLI/API login or change credential helpers. Python waits for the pushed checksum manifest and verifies every public page and asset byte-for-byte over HTTPS before marking the report published. A push alone is not verification. If public content fails to converge, retain the completed report for a publication-only retry. If a tool sandbox explicitly blocks the authorized command, rerun that stage with host escalation and a precise justification. Never redirect or copy authentication state to work around a blocked command. A remote website's HTTP 403 is a source limitation, not a reason for repeated escalation or retries.
 
 ## CLI fallback
 

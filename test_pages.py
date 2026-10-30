@@ -93,13 +93,15 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'symlink'):
             pages.snapshot(site)
 
-    def test_wait_checks_exact_commit_and_every_served_file(self):
-        files = {**self.files, 'page-2.html': b'Archive'}
-        builds = [[{'commit': 'other', 'status': 'built'}], [{'commit': 'target', 'status': 'built'}]]
-        with patch('pages.github', side_effect=builds), patch('pages.time.sleep'), patch('pages.read_public', side_effect=[files['index.html'], files['page-2.html']]) as read:
-            pages.wait_for_publication('owner/repo', 'target', files, 'https://example.test/report/', interval=0, log=lambda _: None)
-        self.assertEqual(read.call_count, 2)
+    def test_wait_checks_manifest_then_every_served_file_without_api(self):
+        files = {**self.files, 'page-2.html': b'Archive', 'publication.json': b'New manifest'}
+        replies = [b'Old manifest', files['publication.json'], files['index.html'], files['page-2.html']]
+        with patch('pages.time.sleep'), patch('pages.read_public', side_effect=replies) as read:
+            pages.wait_for_publication('target', files, 'https://example.test/report/', interval=0, log=lambda _: None)
+        self.assertEqual(read.call_count, 4)
         self.assertTrue(all('deployment=target' in call.args[0] for call in read.call_args_list))
+        self.assertIn('/publication.json?', read.call_args_list[0].args[0])
+        self.assertIn('/page-2.html?', read.call_args_list[-1].args[0])
 
     def test_snapshot_publishes_only_named_checksummed_thumbnail_files(self):
         site = self.root / 'site';site.mkdir()
@@ -119,9 +121,20 @@ class PublicationTests(unittest.TestCase):
         for invalid in ['images/history.sqlite3', 'images/photo.jpg', 'images/../history.sqlite3', 'images/' + 'a'*64 + '.svg']:
             self.assertFalse(pages.public_path(invalid), invalid)
 
-    def test_failed_build_does_not_pass_verification(self):
-        with patch('pages.github', return_value=[{'commit': 'target', 'status': 'errored', 'error': {'message': 'Build error'}}]), self.assertRaisesRegex(ValueError, 'build failed'):
-            pages.wait_for_publication('owner/repo', 'target', self.files, 'https://example.test/', interval=0)
+    def test_stale_archive_cannot_pass_verification(self):
+        files = {**self.files, 'page-2.html': b'New archive'}
+        with patch('pages.time.monotonic', side_effect=[0, 0, 1, 2]), patch('pages.time.sleep'), patch('pages.read_public', side_effect=[files['index.html'], b'Old archive']), self.assertRaisesRegex(RuntimeError, 'publication remains pending.*page-2.html'):
+            pages.wait_for_publication('target', files, 'https://example.test/', timeout=2, interval=0)
+
+    def test_publication_uses_normal_git_and_public_verification(self):
+        config = {'repository': 'owner/repo', 'branch': 'gh-pages', 'url': 'https://owner.github.io/repo/'}
+        (self.repo / 'publication-settings.json').write_text(json.dumps(config))
+        remote = subprocess.CompletedProcess([], 0, stdout=b'git@github.com:owner/repo.git\n')
+        with patch('pages.git', return_value=remote), patch('pages.snapshot', return_value=self.files), patch('pages.push_snapshot', return_value=('target', True)) as push, patch('pages.wait_for_publication') as verify:
+            result = pages.publish_site(self.repo, self.root / 'site', log=lambda _: None)
+        push.assert_called_once_with(self.repo, self.files, 'gh-pages')
+        verify.assert_called_once_with('target', self.files, config['url'], log=unittest.mock.ANY)
+        self.assertEqual(result['commit'], 'target')
 
 
 if __name__ == '__main__':

@@ -44,8 +44,8 @@ def snapshot(directory):
 
 def git(repo, *args, env=None, input=None, check=True):
     # The scheduled task must not open pinentry or depend on an unlocked PGP key.
-    command = ['git', '-c', 'commit.gpgsign=false', '-c', 'credential.helper=',
-               '-c', 'credential.helper=!gh auth git-credential', '-C', str(repo), *args]
+    # Use the repository's normal SSH/HTTPS authentication without requiring gh.
+    command = ['git', '-c', 'commit.gpgsign=false', '-C', str(repo), *args]
     return subprocess.run(command, env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', **(env or {})},
                           input=input, capture_output=True, check=check, timeout=90)
 
@@ -83,44 +83,29 @@ def push_snapshot(repo, files, branch='gh-pages'):
     return commit, True
 
 
-def github(path):
-    result = subprocess.run(['gh', 'api', path], capture_output=True, text=True, timeout=40)
-    if result.returncode:
-        raise RuntimeError('GitHub API read failed: ' + result.stderr.strip())
-    return json.loads(result.stdout)
-
-
 def read_public(url):
     request = Request(url, headers={'Cache-Control': 'no-cache', 'User-Agent': 'DundeePropertyWatch/1.0'})
     with urlopen(request, timeout=30) as response:
         return response.read()
 
 
-def wait_for_publication(repository, commit, files, url, *, timeout=600, interval=15, log=print):
+def wait_for_publication(commit, files, url, *, timeout=600, interval=15, log=print):
+    """Verify the pushed snapshot through public HTTPS, without a GitHub API login."""
     deadline = time.monotonic() + timeout
-    previous = None
     last_error = 'Deployment has not appeared yet'
+    names = [name for name in files if name != '.nojekyll']
+    # Check the manifest first to avoid downloading the archive before propagation.
+    if 'publication.json' in names:
+        names.remove('publication.json')
+        names.insert(0, 'publication.json')
     while time.monotonic() < deadline:
         try:
-            builds = github(f'repos/{repository}/pages/builds?per_page=10')
-            build = next((row for row in builds if row.get('commit') == commit), None)
-            status = build.get('status') if build else 'queued'
-            if status != previous:
-                log(f'GitHub Pages {commit[:12]}: {status}')
-                previous = status
-            if status == 'errored':
-                raise ValueError('GitHub Pages build failed: ' + str(build.get('error')))
-            if status == 'built':
-                for name, expected in files.items():
-                    if name == '.nojekyll':
-                        continue  # This build-control dotfile is intentionally not served.
-                    actual = read_public(url.rstrip('/') + '/' + name + '?deployment=' + commit)
-                    if actual != expected:
-                        raise RuntimeError('Live content does not yet match: ' + name)
-                log(f'Verified {len(files) - 1} public files at {url}')
-                return
-        except ValueError:
-            raise
+            for name in names:
+                actual = read_public(url.rstrip('/') + '/' + name + '?deployment=' + commit)
+                if actual != files[name]:
+                    raise RuntimeError('Live content does not yet match: ' + name)
+            log(f'Verified {len(names)} public files at {url}')
+            return
         except (RuntimeError, OSError) as exc:
             last_error = str(exc)
         remaining = deadline - time.monotonic()
@@ -137,13 +122,10 @@ def publish_site(repo, directory, *, log=print):
     remote = git(repo, 'remote', 'get-url', 'origin').stdout.decode().strip()
     if remote not in {f'https://github.com/{repository}.git', f'git@github.com:{repository}.git'}:
         raise ValueError('Git origin does not match the configured publication repository')
-    site = github(f'repos/{repository}/pages')
-    if site.get('source') != {'branch': branch, 'path': '/'} or site.get('build_type', 'legacy') != 'legacy':
-        raise ValueError('GitHub Pages is not configured for the expected publication branch')
-    if site.get('html_url', '').rstrip('/') != url.rstrip('/') or urlsplit(url).scheme != 'https':
-        raise ValueError('GitHub Pages URL differs from the configured public URL')
+    if urlsplit(url).scheme != 'https':
+        raise ValueError('GitHub Pages URL must use HTTPS')
     files = snapshot(directory)
     commit, pushed = push_snapshot(repo, files, branch)
     log(('Pushed' if pushed else 'Reusing') + ' publication ' + commit[:12])
-    wait_for_publication(repository, commit, files, url, log=log)
+    wait_for_publication(commit, files, url, log=log)
     return {'commit': commit, 'url': url, 'files': len(files) - 1}
