@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageOps
 
 from fetch import public_url
+from model import canonical_url
 
 
 BUDGET_SECONDS = 60
@@ -75,7 +76,7 @@ def image_candidates(html, page_url):
         parsed = urlsplit(url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
             return
-        if UNSUITABLE.search(url + " " + description) or url in seen:
+        if UNSUITABLE.search(url + " " + description) or parsed.path.lower().endswith(('.svg', '.gif')) or url in seen:
             return
         seen.add(url)
         candidates.append(url)
@@ -99,7 +100,7 @@ def image_candidates(html, page_url):
                 structured(item)
         elif isinstance(value, dict):
             kind = value.get("@type", "")
-            if kind in ("Organization", "RealEstateAgent", "Person", "Brand"):
+            if any(k in str(kind) for k in ("Organization", "RealEstateAgent", "Person", "Brand", "ItemList")):
                 return
             for key, item in value.items():
                 if key in {"image", "photo", "thumbnailUrl"}:
@@ -114,6 +115,9 @@ def image_candidates(html, page_url):
             continue
     nodes = soup.select("main img, [class*='gallery'] img, [id*='gallery'] img, [class*='property'] img")
     for node in nodes:
+        if any(re.search(r'related|similar|recommend|property-card', ' '.join(parent.get('class', [])) + ' ' + str(parent.get('id', '')), re.I)
+               for parent in node.parents if getattr(parent, 'attrs', None)):
+            continue
         description = " ".join([str(node.get("alt", "")), str(node.get("class", "")), str(node.get("id", ""))])
         try:
             if (node.get("width") and int(node["width"]) < 320) or (node.get("height") and int(node["height"]) < 180):
@@ -123,8 +127,37 @@ def image_candidates(html, page_url):
         srcset = node.get("data-srcset") or node.get("srcset")
         if srcset:
             add(srcset.split(",")[-1].strip().split()[0], description)
-        add(node.get("data-src") or node.get("src"), description)
+        for attribute in ('data-lazy', 'data-src', 'data-original', 'data-lazy-src', 'src'):
+            add(node.get(attribute), description)
     return candidates[:12]
+
+
+def remember_photo_hints(db, identity, candidate, job):
+    """Retain images from inspected individual pages, including browser evidence."""
+    allowed = {canonical_url(candidate['url']), *[canonical_url(link['url']) for link in candidate.get('additional_urls', [])]}
+    for filename in {item['file'] for item in candidate.get('evidence', [])}:
+        path = (job / filename).resolve()
+        if not path.is_relative_to((job / 'evidence').resolve()):
+            continue
+        try:
+            snapshot = json.loads(path.read_text())
+            if snapshot.get('status') != 200 or snapshot.get('error'):
+                continue
+            page = canonical_url(snapshot.get('final_url') or snapshot['url'])
+            if page not in allowed:
+                continue
+            images = snapshot.get('images', [])
+            if not isinstance(images, list):
+                continue
+            for url in images[:12]:
+                if not isinstance(url, str):
+                    continue
+                parsed = urlsplit(url)
+                if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password or UNSUITABLE.search(url):
+                    continue
+                db.execute('INSERT OR IGNORE INTO photo_hints VALUES (?,?,?,?)', (identity, page, url, str(path)))
+        except (ValueError, KeyError, TypeError, OSError):
+            continue
 
 
 def probe_image(url, deadline):
@@ -195,6 +228,8 @@ def cache_photos(db):
             with db:
                 db.execute("INSERT OR REPLACE INTO photo_cache VALUES (?,?,?)",
                            (url, jpeg, datetime.now(timezone.utc).isoformat()))
+                if jpeg is not None:
+                    db.execute("INSERT OR REPLACE INTO presentation_state VALUES ('photos_dirty','1')")
             attempted += 1
             cached += jpeg is not None
     return {"attempted": attempted, "cached": cached}
@@ -210,11 +245,20 @@ def discover_photo(property_data, deadline):
             break
         # Leave time for portal fallbacks when an original page is unhelpful.
         page_deadline = min(deadline, time.monotonic() + 8)
+        for hint in property_data.get('_photo_hints', []):
+            if canonical_url(url) != hint['page_url'] or time.monotonic() >= page_deadline:
+                continue
+            try:
+                image_url = probe_image(hint['image_url'], page_deadline)
+                if image_url:
+                    return image_url, url
+            except Exception:
+                continue
         try:
             page_url, content_type, body = _request(url, page_deadline)
             if content_type not in {"text/html", "application/xhtml+xml"}:
                 continue
-            for candidate in image_candidates(body, page_url)[:3]:
+            for candidate in image_candidates(body, page_url)[:6]:
                 if time.monotonic() >= page_deadline:
                     break
                 try:
@@ -238,14 +282,18 @@ def enrich_photos(db, day=None, *, retry_failed=False):
             if day is None:
                 raise ValueError("Explicit thumbnail retry requires a report day")
             db.execute("DELETE FROM photos WHERE image_url IS NULL AND property_id IN (SELECT property_id FROM reports WHERE day=?)", (day,))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     query = """SELECT p.id,p.data FROM properties p
-               WHERE NOT EXISTS (SELECT 1 FROM photos f WHERE f.property_id=p.id)
+               LEFT JOIN photos f ON f.property_id=p.id
+               LEFT JOIN photo_cache c ON c.image_url=f.image_url
+               WHERE (f.property_id IS NULL OR (f.image_url IS NULL AND f.checked_at < ?)
+                      OR (c.jpeg IS NULL AND c.checked_at < ? AND f.checked_at < ?))
                AND EXISTS (SELECT 1 FROM reports r WHERE r.property_id=p.id"""
-    values = ()
+    values = (cutoff, cutoff, cutoff)
     if day is not None:
         query += " AND r.day=?"
-        values = (day,)
-    query += ") ORDER BY p.first_seen DESC"
+        values += (day,)
+    query += ") ORDER BY f.checked_at IS NOT NULL, f.checked_at, p.first_seen DESC"
     pending_rows = iter(db.execute(query, values).fetchall())
     deadline = time.monotonic() + BUDGET_SECONDS
     pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
@@ -257,7 +305,9 @@ def enrich_photos(db, day=None, *, retry_failed=False):
             return
         row = next(pending_rows, None)
         if row is not None:
-            pending[pool.submit(discover_photo, json.loads(row[1]), deadline)] = row[0]
+            data = json.loads(row[1])
+            data['_photo_hints'] = [dict(hint) for hint in db.execute('SELECT page_url,image_url FROM photo_hints WHERE property_id=?', (row[0],))]
+            pending[pool.submit(discover_photo, data, deadline)] = row[0]
 
     try:
         for _ in range(MAX_WORKERS):
@@ -276,7 +326,12 @@ def enrich_photos(db, day=None, *, retry_failed=False):
                 except Exception:
                     image_url = page_url = None
                 with db:
-                    db.execute("INSERT OR IGNORE INTO photos VALUES (?,?,?,?)", (property_id, image_url, page_url, datetime.now(timezone.utc).isoformat()))
+                    db.execute("""INSERT INTO photos VALUES (?,?,?,?) ON CONFLICT(property_id) DO UPDATE
+                                  SET image_url=COALESCE(excluded.image_url,photos.image_url),
+                                      page_url=COALESCE(excluded.page_url,photos.page_url),checked_at=excluded.checked_at""",
+                               (property_id, image_url, page_url, datetime.now(timezone.utc).isoformat()))
+                    if image_url:
+                        db.execute("INSERT OR REPLACE INTO presentation_state VALUES ('photos_dirty','1')")
                 attempted += 1
                 added += bool(image_url)
                 submit_next()
@@ -285,7 +340,7 @@ def enrich_photos(db, day=None, *, retry_failed=False):
         with db:
             for future, property_id in pending.items():
                 future.cancel()
-                db.execute("INSERT OR IGNORE INTO photos VALUES (?,NULL,NULL,?)", (property_id, datetime.now(timezone.utc).isoformat()))
+                db.execute("INSERT INTO photos VALUES (?,NULL,NULL,?) ON CONFLICT(property_id) DO UPDATE SET checked_at=excluded.checked_at", (property_id, datetime.now(timezone.utc).isoformat()))
                 attempted += 1
     finally:
         pool.shutdown(wait=False, cancel_futures=True)

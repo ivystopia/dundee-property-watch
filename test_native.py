@@ -59,6 +59,24 @@ class NativeTests(unittest.TestCase):
             merge_assignments(self.job)
         self.assertFalse((workers[0] / "native-closed.json").exists())
 
+    def test_area_hints_are_sealed_and_rebased_with_worker_evidence(self):
+        workers = self.prepared()
+        worker = workers[0]
+        start_worker(worker)
+        sources = json.loads((worker / "sources.json").read_text())
+        url = "https://agent.example/property/one"
+        atomic_json(worker / "evidence/area.json", {"url": url, "status": 200, "text": "Situated in the Hilltown area of Dundee."})
+        atomic_json(worker / "evidence/location-hints.json", [{"url": url, "area": "Hilltown", "file": "evidence/area.json", "quote": "Situated in the Hilltown area of Dundee."}])
+        atomic_json(worker / "research-result.json", {"candidates": [{"url": url, "additional_urls": [], "source_ids": [sources[0]["id"]], "evidence": []}],
+                    "source_checks": [{"source_id": s["id"], "status": "partial", "detail": "Inventory partially checked", "urls": []} for s in sources]})
+        complete(worker)
+        atomic_json(worker / "evidence/location-hints.json", [])
+        self.finish_workers(workers[1:])
+        result = merge_assignments(self.job)
+        self.assertEqual(result["location_hints"][0]["area"], "Hilltown")
+        self.assertEqual(result["location_hints"][0]["file"], "evidence/worker-1/area.json")
+        self.assertTrue((self.job / result["location_hints"][0]["file"]).is_file())
+
     def test_checkpoint_recovery_preserves_other_worker_results(self):
         workers = self.prepared()
         self.finish_workers(workers[:2])
@@ -143,6 +161,55 @@ class NativeTests(unittest.TestCase):
         with patch("watch.collect") as collection:
             self.assertEqual(prepare(self.state, self.site, should_publish=False)["status"], "already_published")
             collection.assert_not_called()
+
+    def test_scheduled_finalization_deduplicates_workers_and_later_portal(self):
+        from copy import deepcopy
+        from datetime import datetime, timedelta, timezone
+        import test_description_identity
+
+        fixture = test_description_identity.DescriptionIdentityTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        pair = fixture.pair()
+        snapshots = [json.loads((fixture.job / p['evidence'][0]['file']).read_text()) for p in pair]
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        third = deepcopy(pair[1])
+        third['url'] = 'https://www.zoopla.co.uk/for-sale/details/33333/'
+        # Use the actual prepare -> seal -> merge -> ingest -> render path with
+        # fresh worker directories, then reopen the database in a later run.
+        for index, candidates in enumerate((pair, [third])):
+            started = fixture.started if index == 0 else tomorrow
+            with patch('native_job.now', return_value=started):
+                workers = self.prepared()
+                for slot, worker in enumerate(workers):
+                    start_worker(worker)
+                    sources = json.loads((worker / 'sources.json').read_text())
+                    items = []
+                    if slot < len(candidates):
+                        p = deepcopy(candidates[slot])
+                        p['source_ids'] = [sources[0]['id']]
+                        snapshot = deepcopy(snapshots[slot if index == 0 else 1])
+                        snapshot.update(url=p['url'], retrieved_at=started)
+                        snapshot['images'] = ['https://images.example/front.jpg']
+                        atomic_json(worker / p['evidence'][0]['file'], snapshot)
+                        items.append(p)
+                    atomic_json(worker / 'research-result.json', {
+                        'candidates': items, 'source_checks': [
+                            dict(source_id=s['id'], status='partial', detail='Offline inventory fixture', urls=[])
+                            for s in sources]})
+                    complete(worker)
+                with patch('watch.enrich_photos'), patch('watch.cache_photos'), patch('watch.enrich_locations'):
+                    outcome = finalize(self.job)
+                    self.assertEqual(finalize(self.job), outcome)
+            self.assertEqual(outcome['counts']['new'], 1 if index == 0 else 0)
+            self.assertEqual(outcome['counts']['duplicates'], 1)
+            with locked_state(self.state) as db:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM reports').fetchone()[0], 1)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM properties').fetchone()[0], 1)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM aliases').fetchone()[0], 2 + index)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM property_descriptions').fetchone()[0], 2 + index)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM photo_hints').fetchone()[0], 2 + index)
+            self.assertEqual((self.site / 'index.html').read_text().count('<h3>Heather Gardens, Dundee</h3>'), 1)
 
     def test_contended_process_lock_does_not_open_database(self):
         self.state.mkdir()

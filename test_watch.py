@@ -55,6 +55,23 @@ class WatchTests(unittest.TestCase):
     def validate(self, p):
         validate_candidate(p, self.job, {"one", "two"}, set(), datetime.fromisoformat(self.started).date())
 
+    def test_ingestion_skips_non_snapshot_evidence_and_keeps_inventory(self):
+        worker = self.job / "evidence" / "worker-1"
+        worker.mkdir()
+        (worker / "location-hints.json").write_text(json.dumps([
+            {"url": "https://agent.example/property/hint-only", "area": "Example"}
+        ]))
+        (worker / "optional.json").write_text("null")
+        (worker / "inventory.json").write_text(json.dumps({
+            "status": 200, "error": "", "url": "https://agent.example/properties",
+            "links": [{"url": "https://www.rightmove.co.uk/properties/5678?utm_source=inventory"}]
+        }))
+
+        self.assertEqual(self.ingest("r1", self.result())["new"], 1)
+        self.assertEqual({row[0] for row in self.db.execute("SELECT url FROM inventory")}, {
+            self.p["url"], "https://www.rightmove.co.uk/properties/5678"
+        })
+
     def test_price_bedrooms_evidence_and_availability_are_enforced(self):
         self.validate(self.p)
         for key, value in [("price_gbp", 270001), ("bedrooms", 4), ("url", "javascript:alert(1)"), ("url", "https://www.rightmove.co.uk/property-for-sale/Dundee.html"), ("url", "https://agent.example/uninspected-page"), ("evidence", [])]:

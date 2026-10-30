@@ -23,6 +23,7 @@ from fetch import fetch
 from model import SCHEMA
 from pages import publish_site
 from photos import cache_photos, enrich_photos
+from locations import enrich_locations, apply_hints, pending_publication
 from render import render
 from store import connect, context, import_export, ingest, inventory_urls, now
 
@@ -203,6 +204,18 @@ def merge_worker(job, worker, sources, result, destination_name=None):
         target = destination / original.relative_to(evidence_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, target)
+    result["location_hints"] = []
+    hints = evidence_root / "location-hints.json"
+    if hints.exists():
+        try:
+            allowed = {canonical for p in result["candidates"] for canonical in [p["url"], *[link["url"] for link in p.get("additional_urls", [])]]}
+            for hint in json.loads(hints.read_text()):
+                original = (worker / hint["file"]).resolve()
+                if hint["url"] in allowed and original.is_relative_to(evidence_root) and original.is_file():
+                    hint["file"] = str((destination / original.relative_to(evidence_root)).relative_to(job))
+                    result["location_hints"].append(hint)
+        except (ValueError, TypeError, KeyError, OSError):
+            pass
     return result
 
 
@@ -229,13 +242,14 @@ def research(job, config=None):
             log(f"{worker.name} failed; other workers' results will be retained")
             return failed_result(assigned, detail)
 
-    merged = {"candidates": [], "source_checks": []}
+    merged = {"candidates": [], "source_checks": [], "location_hints": []}
     log(f"Starting {len(assignments)} research workers, at most {concurrency} concurrently")
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         outputs = list(pool.map(work, assignments))
     for result in outputs:
         merged["candidates"].extend(result["candidates"])
         merged["source_checks"].extend(result["source_checks"])
+        merged["location_hints"].extend(result.get("location_hints", []))
     if len(merged["source_checks"]) != len(sources) or {check["source_id"] for check in merged["source_checks"]} != {source["id"] for source in sources}:
         raise ValueError("Merged research does not cover the source registry exactly once")
     temporary = job / "research-result.tmp"
@@ -245,12 +259,14 @@ def research(job, config=None):
 
 
 def publish(db):
+    log("Location annotations: " + json.dumps(enrich_locations(db)))
     enrich_photos(db)
     log("Thumbnail cache: " + json.dumps(cache_photos(db)))
     render(db, SITE)
     publication = publish_site(ROOT, SITE, log=log)
     with db:
         db.execute("UPDATE runs SET published=? WHERE status IN ('complete','partial') AND published IS NULL", (now(),))
+        db.execute("DELETE FROM presentation_state WHERE key IN ('locations_dirty','photos_dirty')")
     log("Published and verified " + publication["url"])
 
 
@@ -258,7 +274,7 @@ def run(db, state, should_publish, scheduled=False):
     # The process lock means any previous running row is from an interrupted job.
     with db:
         db.execute("UPDATE runs SET status='failed',finished=?,error='Interrupted before completion' WHERE status='running'", (now(),))
-    if should_publish and db.execute("SELECT 1 FROM runs WHERE status IN ('complete','partial') AND published IS NULL").fetchone():
+    if should_publish and (pending_publication(db) or db.execute("SELECT 1 FROM runs WHERE status IN ('complete','partial') AND published IS NULL").fetchone()):
         log("Retrying unpublished completed report")
         publish(db)
     started = now()
@@ -292,6 +308,8 @@ def run(db, state, should_publish, scheduled=False):
         with db:
             db.execute("UPDATE runs SET status='failed',finished=?,error=? WHERE id=?", (now(), str(exc), run_id))
         raise
+    apply_hints(db, result, job)
+    enrich_locations(db, state)
     enrich_photos(db, day=day)
     cache_photos(db)
     render(db, SITE)

@@ -106,7 +106,7 @@ def merge_assignments(job, *, allow_checkpoints=False):
             raise ValueError("Worker still active; interrupt it before checkpoint finalization")
     close_workers(job)
     sources = json.loads((job / "sources.json").read_text())
-    merged = {"candidates": [], "source_checks": []}
+    merged = {"candidates": [], "source_checks": [], "location_hints": []}
     for slot in manifest["workers"]:
         worker = Path(slot["job"])
         assigned = [s for s in sources if s["id"] in slot["source_ids"]]
@@ -131,7 +131,7 @@ def merge_assignments(job, *, allow_checkpoints=False):
             result = watch.failed_result(assigned, detail)
             slot.update(status="failed", detail=detail)
         for key in merged:
-            merged[key].extend(result[key])
+            merged[key].extend(result.get(key, []))
     watch.atomic_json(job / "research-result.json", merged)
     manifest["status"] = "sealed"
     watch.atomic_json(job / "native-research.json", manifest)
@@ -153,7 +153,7 @@ def _prepare(state, site, *, scheduled, should_publish, overall_timeout_seconds)
         if active_lease(db):
             return {"status": "busy"}
         watch.SITE = site
-        if should_publish and db.execute("SELECT 1 FROM runs WHERE status IN ('complete','partial') AND published IS NULL").fetchone():
+        if should_publish and (watch.pending_publication(db) or db.execute("SELECT 1 FROM runs WHERE status IN ('complete','partial') AND published IS NULL").fetchone()):
             watch.publish(db)
         started = now()
         day = datetime.fromisoformat(started).astimezone(ZoneInfo("Europe/London")).date().isoformat()
@@ -222,6 +222,8 @@ def finalize(job, *, allow_checkpoints=False):
             db.execute("UPDATE native_leases SET status=? WHERE run_id=?", ("failed" if counts["status"] == "failed" else "finalized", manifest["run_id"]))
         if counts["status"] == "failed":
             raise RuntimeError("All sources failed; previous public report retained")
+        watch.apply_hints(db, result, job)
+        watch.enrich_locations(db, state)
         watch.enrich_photos(db, day=history["report_day"])
         watch.cache_photos(db)
         watch.render(db, site)

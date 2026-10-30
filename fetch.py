@@ -85,6 +85,8 @@ def fetch(url: str, output: Path, *, tor: bool = False) -> dict:
             soup = BeautifulSoup(body, "html.parser")
             result["title"] = soup.title.get_text(" ", strip=True) if soup.title else ""
             result["structured_data"] = [s.get_text() for s in soup.select('script[type="application/ld+json"]')]
+            from photos import image_candidates
+            result['images'] = image_candidates(body, current)
             seen = set()
             for a in soup.select("a[href]"):
                 link = urljoin(current, a["href"])

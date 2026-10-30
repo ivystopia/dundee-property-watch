@@ -85,8 +85,19 @@ def card(p, day):
         caption = "Developer’s house-type image; appearance may vary." if p["listing_kind"] == "new_build" else ""
         photo = f'''<figure class="photo"><a href="{e(p['url'], quote=True)}" aria-label="View listing for {e(p['address'], quote=True)}"><img src="{e(image_url, quote=True)}" alt="{e(p['address'], quote=True)}" loading="lazy" decoding="async" width="640" height="427" onerror="this.closest('article').classList.remove('has-photo');this.closest('figure').remove()"></a>{f'<figcaption>{caption}</figcaption>' if caption else ''}</figure>'''
     summary = f'<div class="property-summary">{property_type_badge(p["property_type"])}<span class="facts">{p["bedrooms"]} bedrooms{kind}</span></div>'
+    location = p.get("_location", {})
+    area = e(location.get("area") or "Area to confirm")
+    walking = "Walking distance unavailable"
+    if "distance_miles" in location and "duration_minutes" in location:
+        distance = location["distance_miles"]
+        miles = "&lt;0.1" if distance < .05 else f"{distance:.1f}"
+        minutes = max(1, int(location["duration_minutes"] + .5))
+        walking = f"Approx. {miles} miles · {minutes} min walk from Tip Top"
+        if location.get("precision") in {"street", "postcode"}:
+            walking += " · " + ("Street-level estimate" if location["precision"] == "street" else "Postcode estimate")
+    annotation = f'<div class="property-location"><p class="area" aria-label="Approximate area">{area}</p><p class="walking">{walking}</p></div>'
     return f'''<article{' class="has-photo"' if photo else ''}>{summary}{photo}<div class="card-content"><div class="topline"><div class="price">£{p['price_gbp']:,}<span class="qualifier">{e(p['price_qualifier'])}</span></div></div>
-<h3>{e(p['address'])}</h3><p class="date">{e(date_text)} · {e(p['agent'])}</p>{notes}{fallback}<nav class="links" aria-label="Listings for {e(p['address'], quote=True)}">{''.join(links)}</nav></div></article>'''
+<h3>{e(p['address'])}</h3>{annotation}<p class="date">{e(date_text)} · {e(p['agent'])}</p>{notes}{fallback}<nav class="links" aria-label="Listings for {e(p['address'], quote=True)}">{''.join(links)}</nav></div></article>'''
 
 
 def pagination(page, total):
@@ -102,7 +113,7 @@ def render(db, output):
     latest = db.execute("SELECT MAX(day) FROM runs WHERE status IN ('complete','partial')").fetchone()[0]
     if not latest:
         raise ValueError("No completed research run to publish")
-    rows = list(db.execute("SELECT r.day,r.data,p.first_seen,c.jpeg FROM reports r JOIN properties p ON p.id=r.property_id LEFT JOIN photos photo ON photo.property_id=p.id LEFT JOIN photo_cache c ON c.image_url=photo.image_url ORDER BY r.day DESC, json_extract(r.data,'$.listed_date') IS NULL, json_extract(r.data,'$.listed_date') DESC, json_extract(r.data,'$.price_gbp') DESC, r.property_id"))
+    rows = list(db.execute("SELECT r.day,r.data,p.first_seen,c.jpeg,l.data FROM reports r JOIN properties p ON p.id=r.property_id LEFT JOIN photos photo ON photo.property_id=p.id LEFT JOIN photo_cache c ON c.image_url=photo.image_url LEFT JOIN property_locations l ON l.property_id=p.id ORDER BY r.day DESC, json_extract(r.data,'$.listed_date') IS NULL, json_extract(r.data,'$.listed_date') DESC, json_extract(r.data,'$.price_gbp') DESC, r.property_id"))
     pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
     added = sum(row[0] == latest for row in rows)
     output.mkdir(parents=True, exist_ok=True)
@@ -110,7 +121,7 @@ def render(db, output):
     images.mkdir(exist_ok=True)
     image_names = set()
     prepared = []
-    for day, data, first_seen, jpeg in rows:
+    for day, data, first_seen, jpeg, location in rows:
         image_url = None
         if jpeg:
             name = hashlib.sha256(jpeg).hexdigest() + ".jpg"
@@ -122,7 +133,7 @@ def render(db, output):
                     temporary.replace(target)
                 image_names.add(name)
             image_url = "images/" + name
-        prepared.append((day, data, first_seen, image_url))
+        prepared.append((day, data, first_seen, image_url, location))
     rows = prepared
     assets = output / "assets"
     assets.mkdir(exist_ok=True)
@@ -136,15 +147,17 @@ def render(db, output):
             sections.append(f'<section><h2>{date.fromisoformat(latest).strftime("%A, %-d %B %Y")}</h2><p class="empty">No new properties to report today.</p></section>')
         for day, group in groupby(rows[(page - 1) * PAGE_SIZE:page * PAGE_SIZE], key=lambda row: row[0]):
             cards = []
-            for _, data, first_seen, image_url in group:
+            for _, data, first_seen, image_url, location in group:
                 p = json.loads(data)
                 p["image_url"] = image_url
+                p["_location"] = json.loads(location) if location else {}
                 cards.append(card(p, first_seen[:10]))
             sections.append(f'<section><h2>Added {date.fromisoformat(day).strftime("%-d %B %Y")}</h2>{"".join(cards)}</section>')
         nav = pagination(page, pages)
         html = f'''<!doctype html>
 <html lang="en-GB" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,follow"><meta name="theme-color" content="#147d59"><meta name="description" content="A daily archive of homes for sale in Dundee and Broughty Ferry: 2–3 bedrooms, advertised prices up to £{MAX_PRICE_GBP:,}."><title>Dundee property watch{' · Page ' + str(page) if page > 1 else ''}</title><link rel="icon" href="assets/favicon.svg" type="image/svg+xml"><script src="assets/theme.js"></script><link rel="stylesheet" href="assets/pico.jade.min.css"><link rel="stylesheet" href="assets/report.css"></head>
 <body><a class="skip-link" href="#properties">Skip to properties</a><main class="container"><header class="masthead"><div class="masthead-top"><p class="eyebrow">Daily property watch</p><button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.9 13.2A9 9 0 0 1 10.8 3.1 9 9 0 1 0 20.9 13.2Z"/></svg><span>Dark mode</span></button></div><h1>Dundee &amp; Broughty Ferry</h1><p>Homes for sale · 2–3 bedrooms · Up to £{MAX_PRICE_GBP:,}</p><p class="count">Updated {date.fromisoformat(latest).strftime("%-d %B %Y")} · {added} new · {len(rows)} in the archive</p></header>{nav}<div id="properties">{''.join(sections)}</div>{nav}<footer><p>New finds are added each day; earlier entries stay in this archive.<br>Prices and availability reflect when each home was found. Check the linked listing for current details.<br>A listing date is shown where verified. New-build images may show the house type rather than the individual plot.</p><p class="footer-links"><a href="https://ivyf.net/">Ivy’s website</a><a href="https://github.com/ivystopia/dundee-property-watch">About this watch</a><a href="https://picocss.com/">Theme: Pico</a></p></footer></main></body></html>'''
+        html = html.replace('<footer>', '<footer><p>Areas are approximate neighbourhood labels. Walking estimates follow mapped pedestrian routes from Tip Top at a typical pace; listing-map positions may be approximate. Street-level estimates are marked. Map data: <a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>; routes: <a href="https://valhalla.github.io/valhalla/">Valhalla</a>.</p>')
         name = "index.html" if page == 1 else f"page-{page}.html"
         tmp = output / ("." + name + ".tmp")
         tmp.write_text(html)

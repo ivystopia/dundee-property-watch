@@ -9,6 +9,8 @@ import re
 import sqlite3
 
 from model import MAX_PRICE_GBP, canonical_url, identities, merge_property_data, normalize, property_id, same_addressed_home, validate_candidate
+from identity_evidence import description_fingerprints, description_matches, remember_descriptions
+from photos import remember_photo_hints
 
 
 def now():
@@ -37,12 +39,27 @@ def connect(state):
             id TEXT PRIMARY KEY, data TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS aliases (
             alias TEXT PRIMARY KEY, property_id TEXT NOT NULL REFERENCES properties(id));
+        CREATE TABLE IF NOT EXISTS property_descriptions (
+            property_id TEXT NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+            digest TEXT NOT NULL, host TEXT NOT NULL, evidence_file TEXT NOT NULL,
+            PRIMARY KEY(property_id,digest,host));
+        CREATE INDEX IF NOT EXISTS description_digest ON property_descriptions(digest);
         CREATE TABLE IF NOT EXISTS reports (
             day TEXT, property_id TEXT REFERENCES properties(id), data TEXT NOT NULL,
             PRIMARY KEY(day, property_id));
         CREATE TABLE IF NOT EXISTS photos (
             property_id TEXT PRIMARY KEY REFERENCES properties(id), image_url TEXT,
             page_url TEXT, checked_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS photo_hints (
+            property_id TEXT REFERENCES properties(id) ON DELETE CASCADE,
+            page_url TEXT, image_url TEXT, evidence_file TEXT,
+            PRIMARY KEY(property_id,page_url,image_url));
+        CREATE TABLE IF NOT EXISTS property_locations (
+            property_id TEXT PRIMARY KEY REFERENCES properties(id) ON DELETE CASCADE, data TEXT NOT NULL, checked_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS walking_routes (
+            key TEXT PRIMARY KEY, data TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS presentation_state (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS photo_cache (
             image_url TEXT PRIMARY KEY, jpeg BLOB, checked_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS legacy (
@@ -161,12 +178,12 @@ def context(db, sources):
 
 
 def inventory_urls(job):
-    """Extract individual listing URL hints from flat or parallel-worker evidence."""
+    """Extract listing URL hints from page snapshots, ignoring auxiliary JSON."""
     found = set()
     for path in (job / "evidence").rglob("*.json"):
         try:
             snapshot = json.loads(path.read_text())
-            if snapshot.get("status") != 200 or snapshot.get("error"):
+            if not isinstance(snapshot, dict) or snapshot.get("status") != 200 or snapshot.get("error"):
                 continue
             urls = [snapshot.get("url", "")] + [item.get("url", "") for item in snapshot.get("links", [])]
             for url in urls:
@@ -225,11 +242,21 @@ def reconcile_current_aliases(db, run_id, urls):
         db.execute("UPDATE reports SET data=? WHERE property_id=?", (json.dumps(report), keep["id"]))
         db.execute("DELETE FROM reports WHERE property_id=?", (remove["id"],))
         db.execute("UPDATE aliases SET property_id=? WHERE property_id=?", (keep["id"], remove["id"]))
+        db.execute("""INSERT OR IGNORE INTO property_descriptions
+                      SELECT ?,digest,host,evidence_file FROM property_descriptions WHERE property_id=?""", (keep["id"], remove["id"]))
+        db.execute("DELETE FROM property_descriptions WHERE property_id=?", (remove["id"],))
         db.execute("UPDATE legacy SET matched_property_id=? WHERE matched_property_id=?", (keep["id"], remove["id"]))
         photo = db.execute("SELECT * FROM photos WHERE property_id=? AND image_url IS NOT NULL", (remove["id"],)).fetchone()
         if photo and not db.execute("SELECT 1 FROM photos WHERE property_id=? AND image_url IS NOT NULL", (keep["id"],)).fetchone():
             db.execute("INSERT OR REPLACE INTO photos VALUES (?,?,?,?)", (keep["id"], photo["image_url"], photo["page_url"], photo["checked_at"]))
         db.execute("DELETE FROM photos WHERE property_id=?", (remove["id"],))
+        db.execute("INSERT OR IGNORE INTO photo_hints SELECT ?,page_url,image_url,evidence_file FROM photo_hints WHERE property_id=?", (keep["id"], remove["id"]))
+        db.execute("DELETE FROM photo_hints WHERE property_id=?", (remove["id"],))
+        location = db.execute("SELECT data,checked_at FROM property_locations WHERE property_id=?", (remove["id"],)).fetchone()
+        if location:
+            db.execute("INSERT OR IGNORE INTO property_locations VALUES (?,?,?)", (keep["id"], location["data"], location["checked_at"]))
+            db.execute("DELETE FROM property_locations WHERE property_id=?", (remove["id"],))
+            db.execute("INSERT OR REPLACE INTO presentation_state VALUES ('locations_dirty','1')")
         db.execute("DELETE FROM properties WHERE id=?", (remove["id"],))
         db.execute("UPDATE runs SET published=NULL WHERE id=?", (run_id,))
     return True
@@ -251,7 +278,9 @@ def ingest(db, result, job, sources, run_id, day, started):
             try:
                 validate_candidate(candidate, job, source_ids, legacy_ids, datetime.fromisoformat(started).date())
                 keys = identities(candidate)
+                fingerprints = description_fingerprints(candidate, job)
                 matches = {row[0] for key in keys for row in db.execute("SELECT property_id FROM aliases WHERE alias=?", (key,))}
+                matches.update(description_matches(db, candidate, fingerprints))
                 # Workers share yesterday's context, not each other's new discoveries.
                 # Compare with central state after every accepted candidate as well.
                 matches.update(row["id"] for row in db.execute("SELECT id,data FROM properties")
@@ -272,6 +301,8 @@ def ingest(db, result, job, sources, run_id, day, started):
                               SET data=excluded.data,last_seen=excluded.last_seen""", (identity, json.dumps(candidate), first_seen, started))
                 for key in keys:
                     db.execute("INSERT OR IGNORE INTO aliases VALUES (?,?)", (key, identity))
+                remember_descriptions(db, identity, fingerprints)
+                remember_photo_hints(db, identity, candidate, job)
                 if candidate["prior_report_id"]:
                     db.execute("UPDATE legacy SET matched_property_id=? WHERE id=?", (identity, candidate["prior_report_id"]))
                 if old or candidate["prior_report_id"]:

@@ -8,11 +8,77 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from photos import cache_photos, discover_photo, download_thumbnail, enrich_photos, image_candidates, probe_image
+from photos import cache_photos, discover_photo, download_thumbnail, enrich_photos, image_candidates, probe_image, remember_photo_hints
 from store import connect
 
 
 class PhotoTests(unittest.TestCase):
+    def test_photo_publication_failure_remains_pending_until_verified(self):
+        from locations import pending_publication
+        from watch import publish
+        with tempfile.TemporaryDirectory() as directory:
+            db = connect(Path(directory))
+            db.execute("INSERT INTO presentation_state VALUES ('photos_dirty','1')")
+            db.commit()
+            with patch('watch.enrich_locations', return_value={}), patch('watch.enrich_photos'), patch('watch.cache_photos', return_value={}), patch('watch.render'), patch('watch.publish_site', side_effect=RuntimeError('Offline')):
+                with self.assertRaises(RuntimeError):
+                    publish(db)
+            self.assertTrue(pending_publication(db))
+            with patch('watch.enrich_locations', return_value={}), patch('watch.enrich_photos'), patch('watch.cache_photos', return_value={}), patch('watch.render'), patch('watch.publish_site', return_value={'url':'https://example.org'}):
+                publish(db)
+            self.assertFalse(pending_publication(db))
+            db.close()
+
+    def test_lazy_gallery_images_exclude_loading_icons_and_related_homes(self):
+        html = '''<main><div class="gallery"><img src="/loading.gif" data-lazy="/front.jpg">
+        <img data-original="/garden.jpg"><img src="/feature.svg"></div>
+        <div class="related-properties"><img src="/another-house.jpg"></div></main>'''
+        self.assertEqual(image_candidates(html, 'https://agent.example/property/one'),
+                         ['https://agent.example/front.jpg', 'https://agent.example/garden.jpg'])
+
+    def test_saved_browser_image_survives_blocked_listing_and_is_probed(self):
+        page, image = 'https://portal.example/details/123', 'https://images.example/front.jpg'
+        data = {'url': page, '_photo_hints': [{'page_url': page, 'image_url': image}]}
+        with patch('photos._request', side_effect=ValueError('Blocked')) as request, patch('photos.probe_image', return_value=image) as probe:
+            self.assertEqual(discover_photo(data, float('inf')), (image, page))
+            probe.assert_called_once()
+            request.assert_not_called()
+
+    def test_discovery_failures_retry_next_day_without_replacing_cached_photos(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = connect(Path(directory))
+            for index in range(3):
+                data = json.dumps({'url': f'https://agent.example/property/{index}'})
+                db.execute('INSERT INTO properties VALUES (?,?,?,?)', (str(index), data, '2020-01-01', '2020-01-01'))
+                db.execute('INSERT INTO reports VALUES (?,?,?)', ('2020-01-01', str(index), data))
+                url = None if index == 0 else f'https://images.example/{index}.jpg'
+                db.execute('INSERT INTO photos VALUES (?,?,?,?)', (str(index), url, None, '2020-01-01'))
+                if url:
+                    db.execute('INSERT INTO photo_cache VALUES (?,?,?)', (url, b'preserved' if index == 1 else None, '2020-01-01'))
+            db.commit()
+            with patch('photos.discover_photo', return_value=(None, None)) as lookup:
+                self.assertEqual(enrich_photos(db), {'attempted': 2, 'added': 0})
+                self.assertEqual(enrich_photos(db), {'attempted': 0, 'added': 0})
+                self.assertEqual(lookup.call_count, 2)
+            self.assertEqual(db.execute("SELECT jpeg FROM photo_cache WHERE image_url='https://images.example/1.jpg'").fetchone()[0], b'preserved')
+            db.close()
+
+    def test_image_hints_require_evidence_for_known_individual_listing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); db = connect(root); (root/'evidence').mkdir()
+            db.execute('INSERT INTO properties VALUES (?,?,?,?)', ('p', '{}', '2020', '2020'))
+            candidate = dict(url='https://agent.example/property/one', evidence=[dict(file='evidence/page.json')])
+            snapshot = dict(url=candidate['url'], status=200, images=['https://images.example/front.jpg'])
+            (root/'evidence/page.json').write_text(json.dumps(snapshot))
+            remember_photo_hints(db, 'p', candidate, root)
+            remember_photo_hints(db, 'p', candidate, root)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM photo_hints').fetchone()[0], 1)
+            snapshot.update(url='https://agent.example/property/other', images=['https://images.example/other.jpg'])
+            (root/'evidence/page.json').write_text(json.dumps(snapshot))
+            remember_photo_hints(db, 'p', candidate, root)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM photo_hints').fetchone()[0], 1)
+            db.close()
+
     def test_parser_prefers_property_images_and_rejects_branding_and_floorplans(self):
         html = '''<meta property="og:image" content="/brand-logo.png">
         <meta name="twitter:image" content="https://images.example/house-front.jpg">
