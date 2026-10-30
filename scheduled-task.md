@@ -1,10 +1,10 @@
 # Scheduled Dundee Property Watch
 
-Run daily at 08:00 Europe/London as a standalone local Codex scheduled task, starting a fresh chat each time. Keep the computer and desktop app running. Use GPT-6.1 Sol, high reasoning and Standard speed for the parent and all researchers, regardless of interactive defaults.
+Run daily at 08:00 Europe/London as a local chat-bound Codex scheduled task, returning to the same Dundee Property Watch chat (`01a11f72-8920-7c41-ac64-30c23b729110`) every time. Keep the computer and desktop app running. Use GPT-6.1 Sol, high reasoning and Standard speed for the parent and all researchers, regardless of interactive defaults.
 
 The selected backend is recorded in the saved automation prompt. Both backends preserve the existing private history and public webpage. Python alone validates evidence, deduplicates homes, writes history, caches thumbnails and publishes GitHub Pages.
 
-The automation belongs to the Personal project and operates independently of the setup conversation. Its state lives in this repository and the private state directory. Do not create verification heartbeats or follow-ups tied to the setup chat. Complete waiting, retry and publication verification within each standalone Scheduled run; report the first unattended run's verified outcome in its own Scheduled chat.
+The automation is attached to the existing Dundee Property Watch chat. Read this runbook and current repository instructions on every run; authoritative history lives in this repository and the private state directory, not in previous chat messages. Complete waiting, retry and publication verification within each run, and append the actual outcome to the same chat. After the first scheduled run following the chat-bound migration, verify that the result was appended to chat `01a11f72-8920-7c41-ac64-30c23b729110` and include that routing check in its concise completion report. Keep this daily schedule active until the user changes or pauses it.
 
 ## Native workflow
 

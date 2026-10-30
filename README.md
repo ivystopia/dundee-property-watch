@@ -47,9 +47,9 @@ The import seeds deduplication hints; it does not present historical ChatGPT cla
 
 ## Schedule
 
-The standalone local Codex automation runs daily at **08:00 Europe/London**, with a fresh chat for each run in Scheduled. Keep the computer on and the desktop app running. The existing local Personal project supplies the execution host; the saved prompt explicitly targets `/home/ivy/repos/personal/dundee-property-watch`. Read `scheduled-task.md` for the complete coordinator workflow.
+The local chat-bound Codex automation runs daily at **08:00 Europe/London**, returning to the same Dundee Property Watch chat (`01a11f72-8920-7c41-ac64-30c23b729110`) for every run. Keep the computer on and the desktop app running. The existing chat supplies the local execution context; the saved prompt explicitly targets `/home/ivy/repos/personal/dundee-property-watch`. Read `scheduled-task.md` for the complete coordinator workflow.
 
-The schedule and persistent state are independent of the setup conversation. Deleting that conversation does not remove the project automation, repository or SQLite history. Each Scheduled run verifies its own publication and reports its outcome there; no setup-chat heartbeat is required.
+The schedule is attached to the Dundee Property Watch chat; keep that chat available for future runs. Each run verifies its own publication and appends a concise outcome, new-property count, verified report link and any required action there. Authoritative history remains in the repository and private SQLite state, independently of chat history. Researchers still start with fresh contexts and current prepared assignments.
 
 Native execution uses short durable stages rather than keeping a Python supervisor running while agents work:
 
