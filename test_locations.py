@@ -64,6 +64,17 @@ class LocationTests(unittest.TestCase):
         self.assertIn("Walking distance unavailable", page)
         self.assertEqual(self.db.execute("SELECT data FROM reports").fetchone()[0], self.original)
 
+    def test_retained_archive_estimate_is_not_recalculated(self):
+        data = dict(self.annotation, distance_miles=1.24, duration_minutes=24.6,
+                    origin_key="archived-route", retain_estimate=True)
+        locations.save_annotation(self.db, self.pid, data)
+        with patch("locations.request_route") as request, patch("locations.fetch_listing") as fetch:
+            locations.enrich_locations(self.db, self.state)
+            request.assert_not_called()
+            fetch.assert_not_called()
+        stored = json.loads(self.db.execute("SELECT data FROM property_locations").fetchone()[0])
+        self.assertEqual((stored["distance_miles"], stored["duration_minutes"]), (1.24, 24.6))
+
     def test_render_rounding_street_precision_and_private_sources(self):
         data = dict(self.annotation, **self.route(self.origin, self.annotation), precision="street",
                     area="Baxter Park & Stobswell", private_proof="PRIVATE-PROOF-SENTINEL")

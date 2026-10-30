@@ -281,7 +281,10 @@ def enrich_locations(db, state=None, *, budget=120):
         if time.monotonic() >= deadline - 2:
             break
         data = json.loads(row["location"]) if row["location"] else {}
-        current_route = data.get("latitude") is not None and data.get("origin_key") == route_key(origin, data)
+        retained = (data.get("retain_estimate") is True and
+                    all(type(data.get(k)) in {int, float} and math.isfinite(data[k]) and data[k] >= 0
+                        for k in ("distance_miles", "duration_minutes")))
+        current_route = retained or (data.get("latitude") is not None and data.get("origin_key") == route_key(origin, data))
         if current_route and data.get("area"):
             continue
         if row["checked_at"] and data.get("error") and not data.get("reviewed") and (datetime.now(timezone.utc) - datetime.fromisoformat(row["checked_at"])).total_seconds() < 86400:
